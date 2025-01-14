@@ -1,7 +1,6 @@
 ### Bedrockで使えるモデルID一覧を確認するPython
 import boto3
 
-# Bedrockクライアントの作成
 bedrock = boto3.client('bedrock', region_name='ap-northeast-1')
 
 # 利用可能なモデルの一覧を取得

@@ -37,8 +37,7 @@ def main():
 
         with st.chat_message("assistant"):
             response = llm.invoke(user_input)
-            st.markdown(response)
-            print(response)
+            st.markdown(response.content)
 
 if __name__ == '__main__':
     st.set_page_config(
