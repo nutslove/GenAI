@@ -1,0 +1,7 @@
+langchain==0.3.14
+langchain-aws==0.2.10
+streamlit==1.41.1
+altair==4.2.2
+boto3==1.35.98
+langchain-community==0.3.14
+langgraph==0.2.62
