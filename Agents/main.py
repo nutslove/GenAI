@@ -28,7 +28,6 @@ prompt_for_rag = ChatPromptTemplate.from_messages(
             "You are a helpful assistant that compares the given Error Message with the Data from RAG to determine whether the Error Message corresponds to a known issue.\n\
             If it is identified as a known issue, provide the relevant information from the Data from RAG.\n\
             If it is determined to be a new issue, propose the possible causes, impacts, and solutions for the Error Message..\n\
-            Let's think step by step.\n\
             Must answer in Japanese.",
         ),
         ("human", "## Error Message\n{error_message}\n\n## Data from RAG\n{data_from_rag}"),
@@ -53,39 +52,33 @@ retriever = AmazonKnowledgeBasesRetriever(
 )
 
 def main():
-    document1 = Document(
-        page_content="Hello, world!",
-        metadata={"source": "https://example.com"}
-    )
+    query = input("エラーメッセージを入力してください:\n")
+    response = retriever.invoke(query)
+    result = ""
+    print("response:\n", response)
+    # print(response[0].page_content)
+    print("-------------------------------------")
+    for doc in response:
+        # print("page_content encode:\n",doc.page_content.encode())
+        print("Doc:\n", doc)
+        print("-------------------------------------")
+        print("page_content:\n", doc.page_content)
+        print("-------------------------------------")
+        result += doc.page_content
 
-    document2 = Document(
-        page_content="What can I help you?",
-        metadata={"source": "https://nutslove.com"}
-    )
-
-    # doc_list = [document1,document2]
-    doc_list = [document1]
-    # print(doc_list)
-
-    for doc in doc_list:
-        print(doc)
-
-    # query = input("エラーメッセージを入力してください:\n")
-    # response = retriever.invoke(query)
-    # print(len(response))
-    # print(response["Document"].metadata)
+    print("result:\n",result)
 
     # for i in response:
     #     # print(i)
     #     print(i.page_content)
     # print(response)
 
-    # chain = prompt_for_rag | llm
-    # response = chain.invoke({
-    #     "error_message": query,
-    #     "data_from_rag": response,
-    # })
-    # print(response.content)
+    chain = prompt_for_rag | llm
+    response = chain.invoke({
+        "error_message": query,
+        "data_from_rag": result,
+    })
+    print(response.content)
 
 if __name__ == '__main__':
     main()
