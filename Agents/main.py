@@ -28,7 +28,8 @@ prompt_for_rag = ChatPromptTemplate.from_messages(
             "system",
             "You are a helpful assistant that compares the given Error Message with the Data from RAG to determine whether the Error Message corresponds to a known issue.\n\
             If it is identified as a known issue, provide the relevant information from the Data from RAG.\n\
-            If it is determined to be a new issue, propose the possible causes, impacts, and solutions for the Error Message..\n\
+            If it is determined to be a new issue, propose the possible causes, impacts, and solutions for the Error Message.\n\
+            Regarding the solution, suggest commands to investigate and solve the issue.\
             Must answer in Japanese.",
         ),
         ("human", "## Error Message\n{error_message}\n\n## Data from RAG\n{data_from_rag}"),
