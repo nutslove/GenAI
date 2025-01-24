@@ -13,9 +13,9 @@ app = App(
 @app.event("app_mention")
 def message_hello(event, say):
     # イベントがトリガーされたチャンネルへ say() でメッセージを送信
-    text = event["text"]
+    input_text = re.sub("<@.+>", "", event["text"]).strip() # botへのメンションを削除
     say(f"こんにちは、<@{event['user']}> さん！")
-    say(f"次のメッセージを受け取りました: {text}")
+    say(f"次のメッセージを受け取りました: {input_text}")
 
 # Lambdaイベントハンドラー
 def handler(event, context):
