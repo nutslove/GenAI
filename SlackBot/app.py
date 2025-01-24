@@ -11,10 +11,19 @@ app = App(
 )
 
 @app.event("app_mention")
-def message_hello(event, say):
+def message_hello(event, say, ack, client):
+    ack()
+
     # イベントがトリガーされたチャンネルへ say() でメッセージを送信
     input_text = re.sub("<@.+>", "", event["text"]).strip() # botへのメンションを削除
     thread_ts = event.get("thread_ts", event["ts"])  # スレッドタイムスタンプを取得
+
+    # メンションされたメッセージにリアクションを追加
+    client.reactions_add(
+        channel=event["channel"],
+        name="thumbsup",  # 追加するスタンプの名前（例: "thumbsup"）
+        timestamp=event["ts"]  # メンションされたメッセージのタイムスタンプ
+    )
 
     say(
         text=f"こんにちは、<@{event['user']}> さん！",
