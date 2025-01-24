@@ -14,8 +14,16 @@ app = App(
 def message_hello(event, say):
     # イベントがトリガーされたチャンネルへ say() でメッセージを送信
     input_text = re.sub("<@.+>", "", event["text"]).strip() # botへのメンションを削除
-    say(f"こんにちは、<@{event['user']}> さん！")
-    say(f"次のメッセージを受け取りました: {input_text}")
+    thread_ts = event.get("thread_ts", event["ts"])  # スレッドタイムスタンプを取得
+
+    say(
+        text=f"こんにちは、<@{event['user']}> さん！",
+        thread_ts=thread_ts
+    )
+    say(
+        text=f"次のメッセージを受け取りました: {input_text}",
+        thread_ts=thread_ts
+    )
 
 # Lambdaイベントハンドラー
 def handler(event, context):
