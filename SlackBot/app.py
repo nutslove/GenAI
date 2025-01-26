@@ -112,8 +112,9 @@ def handle_modal_submission(ack, body, say):
     region = body["view"]["state"]["values"]["input_block2"]["region"]["value"]
 
     # `private_metadata` から channel_id と thread_ts を取得
+    # say() でスレッドに返信するために channel_id と thread_tsが必要だけど、モーダルビューのコールバックにはそれらが含まれていないため、モーダルを開くときに `private_metadata` に格納しておく
     private_metadata = body["view"]["private_metadata"]
-    channel_id, thread_ts = private_metadata.split(",") # say() でスレッドに返信するために channel_id と thread_ts を取得
+    channel_id, thread_ts = private_metadata.split(",")
 
     # 処理を実行
     say(
@@ -199,8 +200,8 @@ def custom_endpoint(event, context):
     # if auth_token != os.environ.get("CUSTOM_AUTH_TOKEN"):
     #     return jsonify({"error": "Unauthorized"}), 401
 
-    # print("event:\t",event)
-    # print("context:\t",context)
+    print("event:\t",event)
+    print("context:\t",context)
 
     try:
         # Slack API でメッセージを投稿
