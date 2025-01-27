@@ -54,6 +54,36 @@ prompt_for_rag = ChatPromptTemplate.from_messages(
 # def cause_analysis():
 ## 原因分析処理を実装
 
+def send_sqs_message(queue_url, system, region, message_text, thread_ts, channel_id):
+    sqs = boto3.client("sqs")
+    try:
+        sqs.send_message(
+            QueueUrl=queue_url,
+            MessageBody=message_text,
+            MessageGroupId="error_message", # FIFOキュー内の順序を保証する単位 (FIFOキューの場合のみ必要)
+            # FIFO SQSで"コンテンツに基づく重複排除"を有効にしてない場合、MessageDeduplicationIdも指定する必要がある
+            MessageAttributes={
+                'thread_ts': {
+                    'StringValue': thread_ts,
+                    'DataType': 'String'
+                },
+                'channel_id': {
+                    'StringValue': channel_id,
+                    'DataType': 'String'
+                },
+                'system': {
+                    'StringValue': system,
+                    'DataType': 'String'
+                },
+                'region': {
+                    'StringValue': region,
+                    'DataType': 'String'
+                }
+            }
+        )
+    except Exception as e:
+        print("Error sending message to sqs:", str(e))
+
 def rag_analysis(message_text: str, system: str, region: str) -> str:
     chain = retriever | (lambda docs: "\n\n".join(doc.page_content for doc in docs))
     result = chain.invoke(message_text)
@@ -99,7 +129,7 @@ def open_modal(ack, body, client):
         view={
             "type": "modal",
             "callback_id": "modal_callback",
-            "private_metadata": f"{channel_id},{thread_ts},{message_text}",  # channel_id と thread_ts を格納
+            "private_metadata": f"{channel_id},{thread_ts}",  # channel_id と thread_ts を格納
             "title": {
                 "type": "plain_text",
                 "text": "モーダル入力"
@@ -110,6 +140,20 @@ def open_modal(ack, body, client):
                     "text": {
                         "type": "mrkdwn",
                         "text": f"エラーメッセージ内容:\n*{message_text}*"
+                    }
+                },
+                {
+                    "type": "input",
+                    "block_id": "input_block3", # block_id は一意である必要がある
+                    "element": {
+                        "type": "plain_text_input",
+                        "action_id": "error_message",
+                        "initial_value": message_text,  # 初期値としてセット
+                        "multiline": True
+                    },
+                    "label": {
+                        "type": "plain_text",
+                        "text": "エラーメッセージ内容"
                     }
                 },
                 {
@@ -154,30 +198,43 @@ def handle_modal_submission(ack, body, say):
     # `private_metadata` から channel_id と thread_ts を取得
     # say() でスレッドに返信するために channel_id と thread_tsが必要だけど、モーダルビューのコールバックにはそれらが含まれていないため、モーダルを開くときに `private_metadata` に格納しておく
     private_metadata = body["view"]["private_metadata"]
-    channel_id, thread_ts, message_text = private_metadata.split(",")
+    channel_id, thread_ts = private_metadata.split(",")
 
+    # view_stateからメッセージを取得
+    view_state = body["view"]["state"]["values"]
+    print("view_state:\n\t",view_state)
 
     # ユーザー入力を取得
     user = body["user"]["id"]
     system = body["view"]["state"]["values"]["input_block"]["system"]["value"]
     region = body["view"]["state"]["values"]["input_block2"]["region"]["value"]
+    message_text = body["view"]["state"]["values"]["input_block3"]["error_message"]["value"]
 
-    response = rag_analysis(message_text ,system, region)
+    send_sqs_message(os.environ.get("SQS_QUEUE_URL"),system, region, message_text, thread_ts, channel_id)
 
-    # 処理を実行
     say(
-        # text=f"<@{user}> さんが '{system}'システムの'{region}'リージョンの障害について処理を実行しました",
-        text=response,
+        text=f"`<@{user}> さん、{system}`システムの`{region}`リージョン上のの障害について原因分析を行います。しばらくお待ちください。",
         thread_ts=thread_ts,
         channel=channel_id
     )
 
+    #################################################################################################################################
+    # LLM処理に時間がかかり、Slack側で"Slackになかなか接続できません。"とエラーになるため、SQSにメッセージを送信して非同期処理を行うように変更 #
+    #################################################################################################################################
+    # response = rag_analysis(message_text ,system, region)
+
+    # # 処理を実行
+    # say(
+    #     text=response,
+    #     thread_ts=thread_ts,
+    #     channel=channel_id
+    # )
+
 @app.event("app_mention")
 def init(event, say, ack, client):
+    ack()
 
     print("event:\n\t",event)
-
-    ack()
 
     # メンション内容の処理
     text = event.get("text", "")  # メンションに含まれるテキスト
@@ -191,7 +248,7 @@ def init(event, say, ack, client):
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"エラーメッセージを受け取りました: {input_text}\n以下のいずれかのアクションを選択してください："
+                    "text": f"以下のエラーメッセージを受け取りました\n ```\n{input_text}\n```\n*以下のいずれかのアクションを選択してください*"
                 }
             },
             {
