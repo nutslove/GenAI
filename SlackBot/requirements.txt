@@ -1,2 +1,6 @@
 slack_bolt == 1.22.0
 slack_sdk == 3.34.0
+langchain==0.3.14
+langchain-aws==0.2.10
+langchain-community==0.3.14
+langgraph==0.2.62

@@ -4,6 +4,11 @@ from slack_bolt import App
 from slack_bolt.adapter.aws_lambda import SlackRequestHandler
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+from langchain_aws import ChatBedrock, ChatBedrockConverse
+from langchain_aws.retrievers import AmazonKnowledgeBasesRetriever
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+import boto3
 
 # アプリを初期化
 app = App(
@@ -15,9 +20,49 @@ app = App(
 # Slack API クライアント
 slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
 
+llm = ChatBedrock(
+    model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
+    model_kwargs={
+        "temperature": 0.1,
+        # "max_tokens": 8000,
+    }
+)
+
+retriever = AmazonKnowledgeBasesRetriever(
+    knowledge_base_id=os.getenv('KNOWLEDGEBASE_ID'),
+    retrieval_config={
+        "vectorSearchConfiguration": {
+            "numberOfResults": 4
+        }
+    },
+)
+
+prompt_for_rag = ChatPromptTemplate.from_messages(
+    [
+        (
+            "system",
+            "You are a helpful assistant that compares the given Error Message with the Data from RAG to determine whether the Error Message corresponds to a known issue.\n\
+            If it is identified as a known issue, provide the relevant information from the Data from RAG.\n\
+            If it is determined to be a new issue, propose the possible causes, impacts, and solutions for the Error Message.\n\
+            Regarding the solution, suggest commands to investigate and solve the issue.\
+            Must answer in Japanese.",
+        ),
+        ("human", "## Error Message\n{error_message}\n\n## Data from RAG\n{data_from_rag}"),
+    ]
+)
+
 # def cause_analysis():
 ## 原因分析処理を実装
 
+def rag_analysis(message_text: str, system: str, region: str) -> str:
+    chain = retriever | (lambda docs: "\n\n".join(doc.page_content for doc in docs))
+    result = chain.invoke(message_text)
+    chain = prompt_for_rag | llm | StrOutputParser()
+    response = chain.invoke({
+        "error_message": message_text,
+        "data_from_rag": result,
+    })
+    return response
 
 @app.action("execute_action")
 def handle_execute(ack, body, say):
@@ -54,7 +99,7 @@ def open_modal(ack, body, client):
         view={
             "type": "modal",
             "callback_id": "modal_callback",
-            "private_metadata": f"{channel_id},{thread_ts}",  # channel_id と thread_ts を格納
+            "private_metadata": f"{channel_id},{thread_ts},{message_text}",  # channel_id と thread_ts を格納
             "title": {
                 "type": "plain_text",
                 "text": "モーダル入力"
@@ -106,19 +151,23 @@ def handle_modal_submission(ack, body, say):
     # モーダル送信を確認
     ack()
 
+    # `private_metadata` から channel_id と thread_ts を取得
+    # say() でスレッドに返信するために channel_id と thread_tsが必要だけど、モーダルビューのコールバックにはそれらが含まれていないため、モーダルを開くときに `private_metadata` に格納しておく
+    private_metadata = body["view"]["private_metadata"]
+    channel_id, thread_ts, message_text = private_metadata.split(",")
+
+
     # ユーザー入力を取得
     user = body["user"]["id"]
     system = body["view"]["state"]["values"]["input_block"]["system"]["value"]
     region = body["view"]["state"]["values"]["input_block2"]["region"]["value"]
 
-    # `private_metadata` から channel_id と thread_ts を取得
-    # say() でスレッドに返信するために channel_id と thread_tsが必要だけど、モーダルビューのコールバックにはそれらが含まれていないため、モーダルを開くときに `private_metadata` に格納しておく
-    private_metadata = body["view"]["private_metadata"]
-    channel_id, thread_ts = private_metadata.split(",")
+    response = rag_analysis(message_text ,system, region)
 
     # 処理を実行
     say(
-        text=f"<@{user}> さんが '{system}'システムの'{region}'リージョンの障害について処理を実行しました",
+        # text=f"<@{user}> さんが '{system}'システムの'{region}'リージョンの障害について処理を実行しました",
+        text=response,
         thread_ts=thread_ts,
         channel=channel_id
     )
@@ -249,7 +298,8 @@ def custom_endpoint(event, context):
     ts = response["ts"]
     slack_client.reactions_add(
         channel=channel_id,
-        name="go",
+        # name="go",
+        name="thumbsup",
         timestamp=ts
     )
     slack_client.chat_postMessage(
