@@ -203,10 +203,12 @@ def custom_endpoint(event, context):
     print("event:\t",event)
     print("context:\t",context)
 
+    channel_id = os.environ.get("SLACK_CHANNEL_ID")
+
     try:
         # Slack API でメッセージを投稿
         response = slack_client.chat_postMessage(
-            channel="C088L0UP5J7",
+            channel=channel_id,
             # text="test message from custom endpoint"
             blocks=[
                 {
@@ -246,12 +248,12 @@ def custom_endpoint(event, context):
         print(f"Got an error: {e.response['error']}")
     ts = response["ts"]
     slack_client.reactions_add(
-        channel="C088L0UP5J7",
+        channel=channel_id,
         name="go",
         timestamp=ts
     )
     slack_client.chat_postMessage(
-        channel="C088L0UP5J7",
+        channel=channel_id,
         text="thread message",
         thread_ts=ts
     )
