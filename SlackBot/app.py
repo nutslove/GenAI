@@ -1,13 +1,10 @@
 import os
+import time
 import re
 from slack_bolt import App
 from slack_bolt.adapter.aws_lambda import SlackRequestHandler
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
-from langchain_aws import ChatBedrock, ChatBedrockConverse
-from langchain_aws.retrievers import AmazonKnowledgeBasesRetriever
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
 import boto3
 
 # アプリを初期化
@@ -20,40 +17,6 @@ app = App(
 # Slack API クライアント
 slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
 
-llm = ChatBedrock(
-    model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
-    model_kwargs={
-        "temperature": 0.1,
-        # "max_tokens": 8000,
-    }
-)
-
-retriever = AmazonKnowledgeBasesRetriever(
-    knowledge_base_id=os.getenv('KNOWLEDGEBASE_ID'),
-    retrieval_config={
-        "vectorSearchConfiguration": {
-            "numberOfResults": 4
-        }
-    },
-)
-
-prompt_for_rag = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            "You are a helpful assistant that compares the given Error Message with the Data from RAG to determine whether the Error Message corresponds to a known issue.\n\
-            If it is identified as a known issue, provide the relevant information from the Data from RAG.\n\
-            If it is determined to be a new issue, propose the possible causes, impacts, and solutions for the Error Message.\n\
-            Regarding the solution, suggest commands to investigate and solve the issue.\
-            Must answer in Japanese.",
-        ),
-        ("human", "## Error Message\n{error_message}\n\n## Data from RAG\n{data_from_rag}"),
-    ]
-)
-
-# def cause_analysis():
-## 原因分析処理を実装
-
 def send_sqs_message(queue_url, system, region, message_text, thread_ts, channel_id):
     sqs = boto3.client("sqs")
     try:
@@ -61,6 +24,7 @@ def send_sqs_message(queue_url, system, region, message_text, thread_ts, channel
             QueueUrl=queue_url,
             MessageBody=message_text,
             MessageGroupId="error_message", # FIFOキュー内の順序を保証する単位 (FIFOキューの場合のみ必要)
+            MessageDeduplicationId=str(time.time_ns()),
             # FIFO SQSで"コンテンツに基づく重複排除"を有効にしてない場合、MessageDeduplicationIdも指定する必要がある
             MessageAttributes={
                 'thread_ts': {
@@ -84,24 +48,26 @@ def send_sqs_message(queue_url, system, region, message_text, thread_ts, channel
     except Exception as e:
         print("Error sending message to sqs:", str(e))
 
-def rag_analysis(message_text: str, system: str, region: str) -> str:
-    chain = retriever | (lambda docs: "\n\n".join(doc.page_content for doc in docs))
-    result = chain.invoke(message_text)
-    chain = prompt_for_rag | llm | StrOutputParser()
-    response = chain.invoke({
-        "error_message": message_text,
-        "data_from_rag": result,
-    })
-    return response
-
 @app.action("execute_action")
 def handle_execute(ack, body, say):
     # ボタンクリックを確認
     ack()
+    thread_ts = body["message"]["ts"]
+    channel_id = body["channel"]["id"]
+    message_text = body["message"]["blocks"][0]["text"]["text"]
     user = body["user"]["id"]
+    system = "unknown"
+    region = "unknown"
+
+    try:
+        send_sqs_message(os.environ.get("SQS_QUEUE_URL"), system, region, message_text, thread_ts, channel_id)
+    except Exception as e:
+        print("Error sending message to sqs:", str(e))
+
     say(
-        text=f"<@{user}> さん、実行しました！",
-        thread_ts=body["message"]["ts"]    
+        text=f"<@{user}> さん\n 障害について原因分析を行います。しばらくお待ちください。",
+        thread_ts=thread_ts,
+        channel=channel_id
     )
 
 @app.action("rethink_action")
@@ -210,10 +176,13 @@ def handle_modal_submission(ack, body, say):
     region = body["view"]["state"]["values"]["input_block2"]["region"]["value"]
     message_text = body["view"]["state"]["values"]["input_block3"]["error_message"]["value"]
 
-    send_sqs_message(os.environ.get("SQS_QUEUE_URL"),system, region, message_text, thread_ts, channel_id)
+    try:
+        send_sqs_message(os.environ.get("SQS_QUEUE_URL"),system, region, message_text, thread_ts, channel_id)
+    except Exception as e:
+        print("Error sending message to sqs:", str(e))
 
     say(
-        text=f"`<@{user}> さん、{system}`システムの`{region}`リージョン上のの障害について原因分析を行います。しばらくお待ちください。",
+        text=f"<@{user}> さん\n `{system}` システムの `{region}` リージョン上のの障害について原因分析を行います。しばらくお待ちください。",
         thread_ts=thread_ts,
         channel=channel_id
     )
@@ -277,28 +246,6 @@ def init(event, say, ack, client):
         ]
     )
 
-
-    # ack()
-
-    # # イベントがトリガーされたチャンネルへ say() でメッセージを送信
-    # input_text = re.sub("<@.+>", "", event["text"]).strip() # botへのメンションを削除
-    # thread_ts = event.get("thread_ts", event["ts"])  # スレッドタイムスタンプを取得
-    # # メンションされたメッセージにリアクションを追加
-    # client.reactions_add(
-    #     channel=event["channel"],
-    #     name="thumbsup",  # 追加するスタンプの名前（例: "thumbsup"）
-    #     timestamp=event["ts"]  # メンションされたメッセージのタイムスタンプ
-    # )
-
-    # say(
-    #     text=f"こんにちは、<@{event['user']}> さん！",
-    #     thread_ts=thread_ts
-    # )
-    # say(
-    #     text=f"次のメッセージを受け取りました: {input_text}",
-    #     thread_ts=thread_ts
-    # )
-
 # Slack外部からのカスタムエンドポイント
 def custom_endpoint(event, context):
     # # 独自の認証ロジック (例: トークン検証)
@@ -315,7 +262,7 @@ def custom_endpoint(event, context):
         # Slack API でメッセージを投稿
         response = slack_client.chat_postMessage(
             channel=channel_id,
-            # text="test message from custom endpoint"
+            text="test message from custom endpoint",
             blocks=[
                 {
                     "type": "section",
