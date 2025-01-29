@@ -2,7 +2,7 @@ import os
 import re
 from typing import Literal
 from typing_extensions import TypedDict
-from langgraph.graph import MessagesState, START, END
+from langgraph.graph import MessagesState, START, END, StateGraph
 from langgraph.types import Command
 from slack_bolt import App
 from slack_bolt.adapter.aws_lambda import SlackRequestHandler
@@ -13,37 +13,61 @@ from langchain_aws.retrievers import AmazonKnowledgeBasesRetriever
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import tool
+from langgraph.prebuilt import create_react_agent
+from langgraph.checkpoint.memory import MemorySaver
+import operator
+from typing import Annotated
+from langchain_core.pydantic_v1 import BaseModel, Field
+import subprocess
 
-# Define available agents
-members = ["web_researcher", "rag", "nl2sql"]
-# Add FINISH as an option for task completion
-options = members + ["FINISH"]
+class State(BaseModel):
+    query: str = Field(
+        ..., # 必須フィールドを表す
+        description="The user's query.",
+        example="What is the capital of France?"
+    )
 
-# Create system prompt for supervisor
-system_prompt = (
-    "You are a supervisor tasked with managing a conversation between the"
-    f" following workers: {members}. Given the following user request,"
-    " respond with the worker to act next. Each worker will perform a"
-    " task and respond with their results and status. When finished,"
-    " respond with FINISH."
-)
+    messages: Annotated[list[dict[str, str]], operator.add] = Field(
+        default=[],
+        description="List of messages in the conversation.",
+        example=[{"role": "system", "content": "Hello, how can I help you?"}]
+    )
 
-# Define router type for structured output
-class Router(TypedDict):
-    """Worker to route to next. If no workers needed, route to FINISH."""
-    next: Literal["web_researcher", "rag", "nl2sql", "FINISH"]
+    known_issues_judge: bool = Field(
+        default=False,
+        description="Whether the issue is known or not."
+    )
 
-# Create supervisor node function
-def supervisor_node(state: MessagesState) -> Command[Literal["web_researcher", "rag", "nl2sql", "__end__"]]:
-    messages = [
-        {"role": "system", "content": system_prompt},
-    ] + state["messages"]
-    response = llm.with_structured_output(Router).invoke(messages)
-    goto = response["next"]
-    print(f"Next Worker: {goto}")
-    if goto == "FINISH":
-        goto = END
-    return Command(goto=goto)
+# # Define available agents
+# members = ["web_researcher", "rag", "nl2sql"]
+# # Add FINISH as an option for task completion
+# options = members + ["FINISH"]
+
+# # Create system prompt for supervisor
+# system_prompt = (
+#     "You are a supervisor tasked with managing a conversation between the"
+#     f" following workers: {members}. Given the following user request,"
+#     " respond with the worker to act next. Each worker will perform a"
+#     " task and respond with their results and status. When finished,"
+#     " respond with FINISH."
+# )
+
+# # Define router type for structured output
+# class Router(TypedDict):
+#     """Worker to route to next. If no workers needed, route to FINISH."""
+#     next: Literal["web_researcher", "rag", "nl2sql", "FINISH"]
+
+# # Create supervisor node function
+# def supervisor_node(state: MessagesState) -> Command[Literal["web_researcher", "rag", "nl2sql", "__end__"]]:
+#     messages = [
+#         {"role": "system", "content": system_prompt},
+#     ] + state["messages"]
+#     response = llm.with_structured_output(Router).invoke(messages)
+#     goto = response["next"]
+#     print(f"Next Worker: {goto}")
+#     if goto == "FINISH":
+#         goto = END
+#     return Command(goto=goto)
 
 
 
@@ -82,6 +106,7 @@ prompt_for_rag = ChatPromptTemplate.from_messages(
     ]
 )
 
+@tool
 def rag_analysis(message_text: str, system: str, region: str) -> str:
     chain = retriever | (lambda docs: "\n\n".join(doc.page_content for doc in docs))
     result = chain.invoke(message_text)
@@ -120,6 +145,48 @@ def handler(event, context):
             print("region:", region)
 
             response = rag_analysis(message_body ,system, region)
+
+            out = subprocess.run(['aws', 's3', 'ls'], shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            print("subprocess result:\n")
+            print("------------------------------------")
+            print(out.stdout.decode('utf-8'))
+
+            # response = slack_client.chat_postMessage(
+            #     channel=channel_id,
+            #     text="test message from custom endpoint",
+            #     blocks=[
+            #         {
+            #             "type": "section",
+            #             "text": {
+            #                 "type": "mrkdwn",
+            #                 "text": f"以下のいずれかのアクションを選択してください："
+            #             }
+            #         },
+            #         {
+            #             "type": "actions",
+            #             "elements": [
+            #                 {
+            #                     "type": "button",
+            #                     "text": {
+            #                         "type": "plain_text",
+            #                         "text": "実行"
+            #                     },
+            #                     "value": "execute_value",
+            #                     "action_id": "execute_action"
+            #                 },
+            #                 {
+            #                     "type": "button",
+            #                     "text": {
+            #                         "type": "plain_text",
+            #                         "text": "再考"
+            #                     },
+            #                     "value": "rethink_value",
+            #                     "action_id": "rethink_action"
+            #                 }
+            #             ]
+            #         }
+            #     ]
+            # )
 
             slack_client.chat_postMessage(
                 channel=channel_id,

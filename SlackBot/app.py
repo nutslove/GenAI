@@ -307,42 +307,6 @@ def custom_endpoint(event, context):
             ]
         )            
 
-        # response = slack_client.chat_postMessage(
-        #     channel=channel_id,
-        #     text="test message from custom endpoint",
-        #     blocks=[
-        #         {
-        #             "type": "section",
-        #             "text": {
-        #                 "type": "mrkdwn",
-        #                 "text": f"以下のいずれかのアクションを選択してください："
-        #             }
-        #         },
-        #         {
-        #             "type": "actions",
-        #             "elements": [
-        #                 {
-        #                     "type": "button",
-        #                     "text": {
-        #                         "type": "plain_text",
-        #                         "text": "実行"
-        #                     },
-        #                     "value": "execute_value",
-        #                     "action_id": "execute_action"
-        #                 },
-        #                 {
-        #                     "type": "button",
-        #                     "text": {
-        #                         "type": "plain_text",
-        #                         "text": "再考"
-        #                     },
-        #                     "value": "rethink_value",
-        #                     "action_id": "rethink_action"
-        #                 }
-        #             ]
-        #         }
-        #     ]
-        # )
         print("response:\t",response)
     except SlackApiError as e:
         print(f"Got an error: {e.response['error']}")
