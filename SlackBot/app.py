@@ -6,6 +6,7 @@ from slack_bolt.adapter.aws_lambda import SlackRequestHandler
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 import boto3
+import json
 
 # アプリを初期化
 app = App(
@@ -206,9 +207,9 @@ def init(event, say, ack, client):
     print("event:\n\t",event)
 
     # メンション内容の処理
-    text = event.get("text", "")  # メンションに含まれるテキスト
+    text = event["text"]  # メンションに含まれるテキスト
     input_text = re.sub("<@.+?>", "", text).strip()  # メンション部分を除去
-    thread_ts = event.get("thread_ts", event["ts"])  # スレッドタイムスタンプを取得
+    thread_ts = event["ts"]  # スレッドタイムスタンプを取得
 
     say(
         thread_ts=thread_ts,
@@ -255,6 +256,35 @@ def custom_endpoint(event, context):
 
     print("event:\t",event)
     print("context:\t",context)
+
+    # GrafanaからのWebhookの場合
+    if "grafana" in event["headers"].get("user-agent").lower():
+        body = event["body"]
+        print("body:\t",body)
+
+        # bodyのJSONデータを取得
+        body_json = json.loads(event.get('body', '{}'))
+
+        # alertsのデータを取得
+        alerts = body_json.get('alerts', [])
+
+        # 各alertの情報を取得
+        for i, alert in enumerate(alerts):
+            status = alert.get('status', 'N/A')
+            labels = alert.get('labels', {})
+            alertname = labels["alertname"]
+            annotations = alert.get('annotations', {})
+            value_string = alert.get('valueString', 'N/A')
+            message = labels.get('message', 'N/A')
+
+            print(f"Alert {i+1}:")
+            print(f"  Status: {status}")
+            print(f"  Labels: {labels}")
+            print(f"  Annotations: {annotations}")
+            print(f"  ValueString: {value_string}")
+            print(f"  Alertname: {alertname}")
+            print(f"  Message: {message}")
+            print("-" * 40)
 
     channel_id = os.environ.get("SLACK_CHANNEL_ID")
 
