@@ -296,7 +296,15 @@ def custom_endpoint(event, context):
         # Slack API でメッセージを投稿
         response = slack_client.chat_postMessage(
             channel=channel_id,
-            text=f"`{system}` システムの `{region}` リージョン上で以下のアラートが発生しました。原因分析を行いますので、しばらくお待ちください。\n ## Alert Name\n{alertname}\n\n ## Message\n{message}",
+            blocks=[
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"`{system}` システムの `{region}` リージョン上で以下のアラートが発生しました。原因分析を行いますので、しばらくお待ちください。\n\n *Alert Name*\n{alertname}\n\n *Log Message*\n```{message}```"
+                    }
+                }
+            ]
         )            
 
         # response = slack_client.chat_postMessage(

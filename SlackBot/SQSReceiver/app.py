@@ -1,5 +1,9 @@
 import os
 import re
+from typing import Literal
+from typing_extensions import TypedDict
+from langgraph.graph import MessagesState, START, END
+from langgraph.types import Command
 from slack_bolt import App
 from slack_bolt.adapter.aws_lambda import SlackRequestHandler
 from slack_sdk import WebClient
@@ -8,6 +12,41 @@ from langchain_aws import ChatBedrock, ChatBedrockConverse
 from langchain_aws.retrievers import AmazonKnowledgeBasesRetriever
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.tools import tool
+
+# Define available agents
+members = ["web_researcher", "rag", "nl2sql"]
+# Add FINISH as an option for task completion
+options = members + ["FINISH"]
+
+# Create system prompt for supervisor
+system_prompt = (
+    "You are a supervisor tasked with managing a conversation between the"
+    f" following workers: {members}. Given the following user request,"
+    " respond with the worker to act next. Each worker will perform a"
+    " task and respond with their results and status. When finished,"
+    " respond with FINISH."
+)
+
+# Define router type for structured output
+class Router(TypedDict):
+    """Worker to route to next. If no workers needed, route to FINISH."""
+    next: Literal["web_researcher", "rag", "nl2sql", "FINISH"]
+
+# Create supervisor node function
+def supervisor_node(state: MessagesState) -> Command[Literal["web_researcher", "rag", "nl2sql", "__end__"]]:
+    messages = [
+        {"role": "system", "content": system_prompt},
+    ] + state["messages"]
+    response = llm.with_structured_output(Router).invoke(messages)
+    goto = response["next"]
+    print(f"Next Worker: {goto}")
+    if goto == "FINISH":
+        goto = END
+    return Command(goto=goto)
+
+
+
 
 # Slack API クライアント
 slack_client = WebClient(token=os.environ.get("SLACK_BOT_TOKEN"))
@@ -52,6 +91,10 @@ def rag_analysis(message_text: str, system: str, region: str) -> str:
         "data_from_rag": result,
     })
     return response
+
+@tool
+def aws_personol_health_dashboard_check(region: str, account_id: str) -> str:
+    pass
 
 def handler(event, context):
     try:
