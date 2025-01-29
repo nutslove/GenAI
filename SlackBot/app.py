@@ -263,10 +263,12 @@ def custom_endpoint(event, context):
         print("body:\t",body)
 
         # bodyのJSONデータを取得
-        body_json = json.loads(event.get('body', '{}'))
+        # body_json = json.loads(event.get('body', '{}'))
+        body_json = json.loads(body)
 
         # alertsのデータを取得
-        alerts = body_json.get('alerts', [])
+        # alerts = body_json.get('alerts', [])
+        alerts = body_json["alerts"]
 
         # 各alertの情報を取得
         for i, alert in enumerate(alerts):
@@ -276,6 +278,8 @@ def custom_endpoint(event, context):
             annotations = alert.get('annotations', {})
             value_string = alert.get('valueString', 'N/A')
             message = labels.get('message', 'N/A')
+            system = labels.get('sid', 'N/A')
+            region = labels.get('region', 'N/A')
 
             print(f"Alert {i+1}:")
             print(f"  Status: {status}")
@@ -292,55 +296,66 @@ def custom_endpoint(event, context):
         # Slack API でメッセージを投稿
         response = slack_client.chat_postMessage(
             channel=channel_id,
-            text="test message from custom endpoint",
-            blocks=[
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"以下のいずれかのアクションを選択してください："
-                    }
-                },
-                {
-                    "type": "actions",
-                    "elements": [
-                        {
-                            "type": "button",
-                            "text": {
-                                "type": "plain_text",
-                                "text": "実行"
-                            },
-                            "value": "execute_value",
-                            "action_id": "execute_action"
-                        },
-                        {
-                            "type": "button",
-                            "text": {
-                                "type": "plain_text",
-                                "text": "再考"
-                            },
-                            "value": "rethink_value",
-                            "action_id": "rethink_action"
-                        }
-                    ]
-                }
-            ]
-        )
+            text=f"`{system}` システムの `{region}` リージョン上で以下のアラートが発生しました。原因分析を行いますので、しばらくお待ちください。\n ## Alert Name\n{alertname}\n\n ## Message\n{message}",
+        )            
+
+        # response = slack_client.chat_postMessage(
+        #     channel=channel_id,
+        #     text="test message from custom endpoint",
+        #     blocks=[
+        #         {
+        #             "type": "section",
+        #             "text": {
+        #                 "type": "mrkdwn",
+        #                 "text": f"以下のいずれかのアクションを選択してください："
+        #             }
+        #         },
+        #         {
+        #             "type": "actions",
+        #             "elements": [
+        #                 {
+        #                     "type": "button",
+        #                     "text": {
+        #                         "type": "plain_text",
+        #                         "text": "実行"
+        #                     },
+        #                     "value": "execute_value",
+        #                     "action_id": "execute_action"
+        #                 },
+        #                 {
+        #                     "type": "button",
+        #                     "text": {
+        #                         "type": "plain_text",
+        #                         "text": "再考"
+        #                     },
+        #                     "value": "rethink_value",
+        #                     "action_id": "rethink_action"
+        #                 }
+        #             ]
+        #         }
+        #     ]
+        # )
         print("response:\t",response)
     except SlackApiError as e:
         print(f"Got an error: {e.response['error']}")
-    ts = response["ts"]
+    thread_ts = response["ts"]
+
+    try:
+        send_sqs_message(os.environ.get("SQS_QUEUE_URL"),system, region, message, thread_ts, channel_id)
+    except Exception as e:
+        print("Error sending message to sqs:", str(e))
+
     slack_client.reactions_add(
         channel=channel_id,
         # name="go",
         name="thumbsup",
-        timestamp=ts
+        timestamp=thread_ts
     )
-    slack_client.chat_postMessage(
-        channel=channel_id,
-        text="thread message",
-        thread_ts=ts
-    )
+    # slack_client.chat_postMessage(
+    #     channel=channel_id,
+    #     text="thread message",
+    #     thread_ts=thread_ts
+    # )
 
 
 # Lambdaイベントハンドラー
