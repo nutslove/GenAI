@@ -34,17 +34,6 @@ import subprocess
 # This executes code locally, which can be unsafe
 repl = PythonREPL()
 
-# Define available tools
-tools = ["python_repl_tool", "shell_tool"]
-tool_node = ToolNode(tools)
-llm = ChatBedrock(
-    model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
-    model_kwargs={
-        "temperature": 0.1,
-        # "max_tokens": 8000,
-    }
-).bind_tools(tools)
-
 @tool
 def python_repl_tool(
     code: Annotated[str, "The python code to execute to generate your chart."],
@@ -71,6 +60,17 @@ def shell_tool(
         return f"Failed to execute. Error: {repr(e)}"
     result_str = f"Successfully executed:\n\`\`\`shell\n{command}\n\`\`\`\nStdout: {result.stdout}\nStderr: {result.stderr}"
     return result_str
+
+# Define available tools
+tools = [python_repl_tool, shell_tool]
+tool_node = ToolNode(tools)
+llm = ChatBedrock(
+    model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
+    model_kwargs={
+        "temperature": 0.1,
+        # "max_tokens": 8000,
+    }
+).bind_tools(tools)
 
 def should_continue(state: MessagesState) -> Literal["tools", "__end__"]:
     messages = state['messages']
@@ -101,8 +101,8 @@ workflow.add_edge("tools", 'agent')
 graph = workflow.compile()
 
 final_state = graph.invoke(
-    {"messages": [HumanMessage(content="what is the weather in sf")]},
-    config={"configurable": {"thread_id": 42}}
+    {"messages": [HumanMessage(content=input("Enter your message: "))]},
+    # config={"configurable": {"thread_id": 42}}
 )
 print(final_state["messages"][-1].content)
 
