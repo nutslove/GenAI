@@ -11,6 +11,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.messages import HumanMessage
 from IPython.display import display, Image
+from pydantic import BaseModel, Field
 import os
 import random
 
@@ -18,6 +19,10 @@ import random
 # print("AWS_SECRET_ACCESS_KEY:", os.getenv("AWS_SECRET_ACCESS_KEY"))
 # print("AWS_DEFAULT_REGION:", os.getenv("AWS_DEFAULT_REGION"))
 # print("KNOWLEDGEBASE_ID:", os.getenv("KNOWLEDGEBASE_ID"))
+
+class RagModel(BaseModel):
+    result: str = Field(..., description="The result from the RAG")
+    next: str = Field(..., description="The next worker to act")
 
 class State(MessagesState):
     next: str
@@ -50,7 +55,7 @@ prompt_for_rag = ChatPromptTemplate.from_messages(
 )
 
 @tool
-def rag_analysis(state: State) -> tuple[str, str]:
+def rag_analysis(state: State) -> RagModel:
     """
     Perform RAG (Retrieval-Augmented Generation) analysis on the given message.
 
@@ -62,17 +67,17 @@ def rag_analysis(state: State) -> tuple[str, str]:
         str: worker to act next.
     """
     chain = retriever | (lambda docs: "\n\n".join(doc.page_content for doc in docs))
-    print("state:\n------------------------------------------\n", state)
-    print("state['messages'][-1].content:\n------------------------------------------\n", state["messages"][-1].content)
+    print("\nstate:\n------------------------------------------\n", state)
+    print("\nstate['messages'][-1].content:\n------------------------------------------\n", state["messages"][-1].content)
     result = chain.invoke(state["messages"][-1].content)
-    chain = prompt_for_rag | llm | StrOutputParser()
+    # chain = prompt_for_rag | llm | StrOutputParser()
+    chain = prompt_for_rag | llm.with_structured_output(RagModel)
     response = chain.invoke({
         "error_message": state["messages"][-1].content,
         "data_from_rag": result,
     })
-    print("response in rag_analysis function:\n------------------------------------------\n", response)
-    print("response['next'] in rag_analysis function:\n------------------------------------------\n", response["next"])
-    return response, response["next"]
+    print("\nresponse in rag_analysis function:\n------------------------------------------\n", response)
+    return response
 
 @tool
 def aws_personol_health_dashboard_check(state: State) -> str:
@@ -129,11 +134,12 @@ def rag_analysis_node(state: State) -> Command[Literal["supervisor", "__end__"]]
     # messages = [
     #     {"role": "system", "content": prompt_for_rag},
     # ] + state["messages"]
-    messages = state["messages"]
     result = rag_agent.invoke(state)
     # goto = result["next"]
-    goto = result.get("next", "__end__")
-    print("result in rag_analysis_node:\n------------------------------------------\n", result)
+    goto = result.get("next")
+    print("\ngoto in rag_analysis_node:\n------------------------------------------\n", goto)
+    print("\nresponse in rag_analysis_node:\n------------------------------------------\n", result.get("result"))
+    print("\nresult in rag_analysis_node:\n------------------------------------------\n", result)
     if goto == "FINISH":
         goto = END
     return Command(
