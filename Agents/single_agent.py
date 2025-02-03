@@ -66,16 +66,16 @@ def shell_tool(
     result_str = f"Successfully executed:\n\`\`\`shell\n{command}\n\`\`\`\nStdout: {result.stdout}\nStderr: {result.stderr}"
     return result_str
 
-@tool
-def rag_analysis(message_text: str, system: str, region: str) -> str:
-    chain = retriever | (lambda docs: "\n\n".join(doc.page_content for doc in docs))
-    result = chain.invoke(message_text)
-    chain = prompt_for_rag | llm | StrOutputParser()
-    response = chain.invoke({
-        "error_message": message_text,
-        "data_from_rag": result,
-    })
-    return response
+# @tool
+# def rag_analysis(message_text: str, system: str, region: str) -> str:
+#     chain = retriever | (lambda docs: "\n\n".join(doc.page_content for doc in docs))
+#     result = chain.invoke(message_text)
+#     chain = prompt_for_rag | llm | StrOutputParser()
+#     response = chain.invoke({
+#         "error_message": message_text,
+#         "data_from_rag": result,
+#     })
+#     return response
 
 # Define available tools
 tools = [python_repl_tool, shell_tool]
@@ -88,39 +88,42 @@ llm = ChatBedrock(
     }
 ).bind_tools(tools)
 
-retriever = AmazonKnowledgeBasesRetriever(
-    knowledge_base_id=os.getenv('KNOWLEDGEBASE_ID'),
-    retrieval_config={
-        "vectorSearchConfiguration": {
-            "numberOfResults": 4
-        }
-    },
-)
+# retriever = AmazonKnowledgeBasesRetriever(
+#     knowledge_base_id=os.getenv('KNOWLEDGEBASE_ID'),
+#     retrieval_config={
+#         "vectorSearchConfiguration": {
+#             "numberOfResults": 4
+#         }
+#     },
+# )
 
-prompt_for_rag = ChatPromptTemplate.from_messages(
-    [
-        (
-            "system",
-            "You are a helpful assistant that compares the given Error Message with the Data from RAG to determine whether the Error Message corresponds to a known issue.\n\
-            If it is identified as a known issue, provide the relevant information from the Data from RAG.\n\
-            If it is determined to be a new issue, propose the possible causes, impacts, and solutions for the Error Message.\n\
-            Regarding the solution, execute commands that don't change anyting to investigate the issue(e.g. ls -l).\
-            Do not execute commands to change config(e.g. rm -f /var/log/messages)!\
-            Must answer in Japanese.",
-        ),
-        ("human", "## Error Message\n{error_message}\n\n## Data from RAG\n{data_from_rag}"),
-    ]
-)
+# prompt_for_rag = ChatPromptTemplate.from_messages(
+#     [
+#         (
+#             "system",
+#             "You are a helpful assistant that compares the given Error Message with the Data from RAG to determine whether the Error Message corresponds to a known issue.\n\
+#             If it is identified as a known issue, provide the relevant information from the Data from RAG.\n\
+#             If it is determined to be a new issue, propose the possible causes, impacts, and solutions for the Error Message.\n\
+#             Regarding the solution, execute commands that don't change anyting to investigate the issue(e.g. ls -l).\
+#             Do not execute commands to change config(e.g. rm -f /var/log/messages)!\
+#             Must answer in Japanese.",
+#         ),
+#         ("human", "## Error Message\n{error_message}\n\n## Data from RAG\n{data_from_rag}"),
+#     ]
+# )
 
 def should_continue(state: MessagesState) -> Literal["tools", "__end__"]:
+    # print("State:\n-----------------------------------\n", state, "\n-----------------------------------")
     messages = state['messages']
     last_message = messages[-1]
+    # print("Last message:\n-----------------------------------\n", last_message, "\n-----------------------------------")
     if last_message.tool_calls:
         return "tools"
     return "__end__"
 
 def call_llm(state: MessagesState):
     messages = state['messages']
+    # print("State:\n-----------------------------------\n", state, "\n-----------------------------------")
 
     # Invoking `llm` will automatically infer the correct tracing context
     response = llm.invoke(messages)
@@ -146,7 +149,13 @@ final_state = graph.invoke(
 )
 print(final_state["messages"][-1].content)
 
-# Save the graph as a PNG
-png_data = graph.get_graph().draw_mermaid_png()
-with open("workflow_diagram.png", "wb") as f:
-    f.write(png_data)
+# for s in graph.stream(
+#     {"messages": [HumanMessage(content=input("Enter your message: "))]}
+# ):
+#     print(s)
+#     print("--------------------------------------------------")
+
+# # Save the graph as a PNG
+# png_data = graph.get_graph().draw_mermaid_png()
+# with open("workflow_diagram.png", "wb") as f:
+#     f.write(png_data)

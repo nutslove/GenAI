@@ -14,13 +14,6 @@ from IPython.display import display, Image
 import os
 import random
 
-# def main():
-#   text_message = input("Please enter a message: ")
-
-
-# if __name__ == '__main__':
-#     main()
-
 # print("AWS_ACCESS_KEY_ID:", os.getenv("AWS_ACCESS_KEY_ID"))
 # print("AWS_SECRET_ACCESS_KEY:", os.getenv("AWS_SECRET_ACCESS_KEY"))
 # print("AWS_DEFAULT_REGION:", os.getenv("AWS_DEFAULT_REGION"))
@@ -28,7 +21,7 @@ import random
 
 class State(MessagesState):
     next: str
-    system: str
+    system_name: str
     region: str
     account_id: str
 
@@ -56,32 +49,30 @@ prompt_for_rag = ChatPromptTemplate.from_messages(
     ]
 )
 
-# prompt_for_rag = (
-#   "You are a helpful assistant that compares the given Error Message with the Data from RAG to determine whether the Error Message corresponds to a known issue."
-#   "If it is identified as a known issue, provide the relevant information from the Data from RAG and respond with FINISH."
-# )
-
 @tool
-def rag_analysis(state: State) -> str:
+def rag_analysis(state: State) -> tuple[str, str]:
     """
     Perform RAG (Retrieval-Augmented Generation) analysis on the given message.
 
     Args:
-        message_text (str): The input message to analyze.
-        system (str): The system context.
-        region (str): The AWS region.
+        state (State): The current state of the conversation.
 
     Returns:
         str: The result of the RAG analysis.
+        str: worker to act next.
     """
     chain = retriever | (lambda docs: "\n\n".join(doc.page_content for doc in docs))
+    print("state:\n------------------------------------------\n", state)
+    print("state['messages'][-1].content:\n------------------------------------------\n", state["messages"][-1].content)
     result = chain.invoke(state["messages"][-1].content)
     chain = prompt_for_rag | llm | StrOutputParser()
     response = chain.invoke({
         "error_message": state["messages"][-1].content,
         "data_from_rag": result,
     })
-    return response
+    print("response in rag_analysis function:\n------------------------------------------\n", response)
+    print("response['next'] in rag_analysis function:\n------------------------------------------\n", response["next"])
+    return response, response["next"]
 
 @tool
 def aws_personol_health_dashboard_check(state: State) -> str:
@@ -101,7 +92,7 @@ def alert_status_check(state: State) -> str:
 members = ["aws_personol_health_dashboard_check","alert_status_check"]
 options = members + ["FINISH"]
 
-system_prompt = (
+system_prompt_for_supervisor = (
     "You are a supervisor tasked with managing a conversation between the"
     f" following workers: {members}. Given the following user request,"
     " respond with the worker to act next. Each worker will perform a"
@@ -109,29 +100,17 @@ system_prompt = (
     " respond with FINISH."
 )
 
+system_prompt_for_rag_analysis = (
+    "You are a helpful assistant that compares the given Error Message with the Data from RAG to determine whether the Error Message corresponds to a known issue."
+    "If it is identified as a known issue, provide the relevant information from the Data from RAG and respond with FINISH."
+)
+
 class Router(TypedDict):
     next: Literal["aws_personol_health_dashboard_check", "alert_status_check", "FINISH"]
 
-def routing_for_rag(state: State) -> Literal["supervisor", "__end__"]:
-    messages = state['messages']
-    print("messages:\n", messages)
-    last_message = messages[-1]
-    print("last_message:\n", last_message)
-    # if last_message.tool_calls:
-    #     return "supervisor"
-    return "__end__"
-
-def routing_for_supervisor(state: State) -> Literal["aws_personol_health_dashboard_check", "alert_status_check", "__end__"]:
-    messages = state["messages"]
-    last_message = messages[-1]
-    print("messages:\n", messages)
-    print("last_message:\n", last_message)
-
-    return "aws_personol_health_dashboard_check"
-
 def supervisor_node(state: State) -> Command[Literal["aws_personol_health_dashboard_check","alert_status_check", "__end__"]]:
     messages = [
-        {"role": "system", "content": system_prompt},
+        {"role": "system", "content": system_prompt_for_supervisor},
     ] + state["messages"]
     response = llm.with_structured_output(Router).invoke(messages)
     goto = response["next"]
@@ -139,22 +118,29 @@ def supervisor_node(state: State) -> Command[Literal["aws_personol_health_dashbo
         goto = END
     return Command(goto=goto, update={"next": goto})
 
-rag_agent = create_react_agent(llm, tools=[rag_analysis])
+rag_agent = create_react_agent(llm, tools=[rag_analysis], response_format=Router, prompt=system_prompt_for_rag_analysis)
+
+# # Save the graph as a PNG
+# png_data = rag_agent.get_graph().draw_mermaid_png()
+# with open("rag_agent_workflow_diagram.png", "wb") as f:
+#     f.write(png_data)
 
 def rag_analysis_node(state: State) -> Command[Literal["supervisor", "__end__"]]:
     # messages = [
     #     {"role": "system", "content": prompt_for_rag},
     # ] + state["messages"]
     messages = state["messages"]
-    result = rag_agent.invoke(messages)
-    goto = result["next"]
+    result = rag_agent.invoke(state)
+    # goto = result["next"]
+    goto = result.get("next", "__end__")
+    print("result in rag_analysis_node:\n------------------------------------------\n", result)
     if goto == "FINISH":
         goto = END
     return Command(
         update={
-            # "messages": [
-            #     HumanMessage(content=result["messages"][-1].content, name="rag_analysis")
-            # ],
+            "messages": [
+                HumanMessage(content=result["messages"][-1].content, name="rag_analysis")
+            ],
             "next": goto
         },
         goto=goto,
@@ -162,7 +148,12 @@ def rag_analysis_node(state: State) -> Command[Literal["supervisor", "__end__"]]
 
 alert_status_check_agent = create_react_agent(llm, tools=[alert_status_check])
 
-def alert_status_check_node(state: State) -> Command[Literal["supervisor"]]:
+# # Save the graph as a PNG
+# png_data = alert_status_check_agent.get_graph().draw_mermaid_png()
+# with open("alert_status_check_agent_workflow_diagram.png", "wb") as f:
+#     f.write(png_data)
+
+def alert_status_check_node(state: State) -> Command:
     result = alert_status_check_agent.invoke(state)
     return Command(
         update={
@@ -170,12 +161,17 @@ def alert_status_check_node(state: State) -> Command[Literal["supervisor"]]:
                 HumanMessage(content=result["messages"][-1].content, name="alert_status_check_agent")
             ]
         },
-        goto="supervisor",
+        goto=None,
     )
 
 aws_personol_health_dashboard_check_agent = create_react_agent(llm, tools=[aws_personol_health_dashboard_check])
 
-def aws_personol_health_dashboard_check_node(state: State) -> Command[Literal["supervisor"]]:
+# # Save the graph as a PNG
+# png_data = aws_personol_health_dashboard_check_agent.get_graph().draw_mermaid_png()
+# with open("aws_personol_health_dashboard_check_agent_workflow_diagram.png", "wb") as f:
+#     f.write(png_data)
+
+def aws_personol_health_dashboard_check_node(state: State) -> Command:
     result = aws_personol_health_dashboard_check_agent.invoke(state)
     return Command(
         update={
@@ -183,7 +179,7 @@ def aws_personol_health_dashboard_check_node(state: State) -> Command[Literal["s
                 HumanMessage(content=result["messages"][-1].content, name="aws_personol_health_dashboard_check")
             ]
         },
-        goto="supervisor",
+        goto=None,
     )
 
 builder = StateGraph(State)
@@ -192,24 +188,23 @@ builder.add_node("rag_analysis", rag_analysis_node)
 builder.add_node("alert_status_check", alert_status_check_node)
 builder.add_node("aws_personol_health_dashboard_check", aws_personol_health_dashboard_check_node)
 builder.add_edge(START, "rag_analysis")
-builder.add_conditional_edges("rag_analysis", routing_for_rag)
-builder.add_conditional_edges("supervisor", routing_for_supervisor)
 builder.add_edge("aws_personol_health_dashboard_check", "supervisor")
 builder.add_edge("alert_status_check", "supervisor")
 graph = builder.compile()
 
-# Save the graph as a PNG
-png_data = graph.get_graph().draw_mermaid_png()
-with open("workflow_diagram.png", "wb") as f:
-    f.write(png_data)
+# # Save the graph as a PNG
+# png_data = graph.get_graph().draw_mermaid_png()
+# with open("workflow_diagram.png", "wb") as f:
+#     f.write(png_data)
 
 for s in graph.stream(
     {
         "messages": [("user", input("input messages: \n"))],
-        "system": "goku",
+        "system_name": "goku",
         "region": "ap-northeast-1",
         "account_id": "123456789012",
-    }, subgraphs=True
+    },
+    # subgraphs=True
 ):
     print(s)
     print("----")
