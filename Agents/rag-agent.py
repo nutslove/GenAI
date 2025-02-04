@@ -100,7 +100,7 @@ def tool_node(state: State):
         )
     # return {"messages": outputs}
     state["messages"] = outputs
-    return state # "messages"だけ返すと他の項目
+    return state # "messages"だけ返すと他の項目の値が失われる？
 
 # Define the node that calls the model (agent)
 def call_model(
