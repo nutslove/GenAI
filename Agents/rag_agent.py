@@ -22,7 +22,7 @@ class State(MessagesState):
     system_name: str = ""
     region: str = "ap-northeast-1"
     account_id: str = ""
-    unknown: bool = True
+    known: bool = False
     command: str = ""
 
 llm = ChatBedrock( # 後日 "anthropic.claude-3-5-sonnet-20241022-v2:0" を試してみる
@@ -43,16 +43,16 @@ prompt_for_rag = ChatPromptTemplate.from_messages(
         (
             "system",
             "You are a helpful assistant that compares the given Error Message with the Data from RAG to determine whether the Error Message corresponds to a known issue.\n\
-            If it is identified as a known issue, provide, set `unknown` to `False`.\n\
-            Also, if there is a clear command to solve the issue in the data from RAG, set the command to `command`.\n\
-            Don't set anything to `command` if there is no clear description of a command to solve the issue in the data from RAG.",
+            If it is identified as a known issue, provide, set `known` to `True`.\n\
+            Also, if there is a specific command to solve the issue in the data from RAG, set the command to `command`.\n\
+            Don't set anything to `command` if there is no specific description of a command to solve the issue in the data from RAG.",
         ),
         ("human", "# Error Message\n{error_message}\n\n# Data from RAG\n{data_from_rag}"),
     ]
 )
 
 class RagResponse(BaseModel):
-    unknown: bool = Field(..., description="Whether the Error Message corresponds to a known issue.")
+    known: bool = Field(..., description="Whether the Error Message corresponds to a known issue.")
     command: str = Field(..., description="The command to execute.")
 
 @tool
@@ -73,39 +73,34 @@ def rag_analysis(state: State) -> State:
         "data_from_rag": rag_result,
     })
     print("\nresponse in rag_analysis tool:\n------------------------------------------\n", response)
-    state["unknown"] = response.unknown
-    state["command"] = response.command
+    state["known"] = response.known # Stateのknownフィールドを更新
+    state["command"] = response.command # Stateのcommandフィールドを更新
     print("\nstate after update:\n------------------------------------------\n", state)
-    # return response
     return state
 
 tools = [rag_analysis]
 llm_model = llm.bind_tools(tools)
 
-tools_by_name = {tool.name: tool for tool in tools}
+tools_by_name = {tool.name: tool for tool in tools} # 複数のツールがある場合に備えて辞書にしておく
 
-# Define our tool node
 def tool_node(state: State):
     outputs = []
     print('\nstate["messages"][-1] in tool_node:\n------------------------------------\n', state["messages"][-1])
     print("\nstate in tool_node:\n--------------------------------------------\n", state)
     for tool_call in state["messages"][-1].tool_calls:
         tool_result = tools_by_name[tool_call["name"]].invoke({"state": state})
-        state.update(tool_result)
+        state.update(tool_result) # Stateを更新
         outputs.append(
             ToolMessage(
-                # content=json.dumps(tool_result),
                 content=tool_result,
                 name=tool_call["name"],
                 tool_call_id=tool_call["id"],
             )
         )
-    # return {"messages": outputs}
     state["messages"] = outputs
-    return state # "messages"だけ返すと他の項目の値が失われる？
+    return state # 次のNodeに入力としてStateを渡す
 
-# Define the node that calls the model (agent)
-def call_model(
+def call_model( # これがAgent
     state: State,
     config: RunnableConfig,
 ):
@@ -116,12 +111,9 @@ def call_model(
     response = llm_model.invoke([system_prompt] + state["messages"], config)
     print("\nresponse in call_model:\n----------------------------------------------\n", response)
     print("\nstate in call_model:\n----------------------------------------------\n", state)
-    # # We return a list, because this will get added to the existing list
-    # return {"messages": [response]}
 
     state["messages"] = [response]
-    # 他のフィールドはそのまま残るように、state 全体を返す
-    return state
+    return state # 次のNodeに入力としてStateを渡す。（他のフィールドはそのまま残るように、state 全体を返す）
 
 # Define the conditional edge that determines whether to continue or not
 def should_continue(state: State):
@@ -138,43 +130,19 @@ def should_continue(state: State):
     else:
         return "continue"
 
-# Define a new graph
 builder = StateGraph(State)
-
-# Define the two nodes we will cycle between
 builder.add_node("rag_agent", call_model)
 builder.add_node("rag_tools", tool_node)
-
-# Set the entrypoint as `agent`
-# This means that this node is the first one called
 builder.set_entry_point("rag_agent")
-
-# We now add a conditional edge
 builder.add_conditional_edges(
-    # First, we define the start node. We use `agent`.
-    # This means these are the edges taken after the `agent` node is called.
     "rag_agent",
-    # Next, we pass in the function that will determine which node is called next.
     should_continue,
-    # Finally we pass in a mapping.
-    # The keys are strings, and the values are other nodes.
-    # END is a special node marking that the graph should finish.
-    # What will happen is we will call `should_continue`, and then the output of that
-    # will be matched against the keys in this mapping.
-    # Based on which one it matches, that node will then be called.
     {
-        # If `tools`, then we call the tool node.
         "continue": "rag_tools",
-        # Otherwise we finish.
         "end": END,
     },
 )
-
-# We now add a normal edge from `tools` to `agent`.
-# This means that after `tools` is called, `agent` node is called next.
 builder.add_edge("rag_tools", "rag_agent")
-
-# Now we can compile and visualize our graph
 graph = builder.compile()
 
 # # Save the graph as a PNG
@@ -199,11 +167,16 @@ def print_stream(stream):
 
     print("Final state saved to final_state.txt")
 
-print_stream(graph.stream({
-    "messages": [("user", input("input error message:\n"))],
-    "system_name": "Goku",
-    "region": "ap-northeast-1",
-    "account_id": "1234567890",
-    "unknown": True,
-    "command": "",
-    }, stream_mode="values"))
+def main():
+    print_stream(graph.stream({
+        "messages": [("user", input("input error message:\n"))],
+        "system_name": "Goku",
+        "region": "ap-northeast-1",
+        "account_id": "1234567890",
+        "known": False,
+        "command": "",
+        }, stream_mode="values"))
+
+
+if __name__ == "__main__":
+    main()
