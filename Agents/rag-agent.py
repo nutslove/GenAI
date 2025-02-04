@@ -61,7 +61,7 @@ def rag_analysis(state: State) -> State:
     Perform RAG (Retrieval-Augmented Generation) analysis on the given error message.
     """
     chain = retriever | (lambda docs: "\n\n".join(doc.page_content for doc in docs))
-    print("\nstate:\n------------------------------------------\n", state)
+    print("\nstate before update:\n------------------------------------------\n", state)
     print("\nstate['messages'][0].content:\n------------------------------------------\n", state["messages"][0].content)
     error_message = state["messages"][0].content
     rag_result = chain.invoke(error_message)
@@ -75,6 +75,7 @@ def rag_analysis(state: State) -> State:
     print("\nresponse in rag_analysis tool:\n------------------------------------------\n", response)
     state["unknown"] = response.unknown
     state["command"] = response.command
+    print("\nstate after update:\n------------------------------------------\n", state)
     # return response
     return state
 
@@ -90,6 +91,7 @@ def tool_node(state: State):
     print("\nstate in tool_node:\n--------------------------------------------\n", state)
     for tool_call in state["messages"][-1].tool_calls:
         tool_result = tools_by_name[tool_call["name"]].invoke({"state": state})
+        state.update(tool_result)
         outputs.append(
             ToolMessage(
                 # content=json.dumps(tool_result),
