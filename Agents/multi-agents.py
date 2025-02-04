@@ -40,7 +40,7 @@ retriever = AmazonKnowledgeBasesRetriever(
 )
 
 llm = ChatBedrock(
-    model_id="anthropic.claude-3-5-sonnet-20240620-v1:0", model_kwargs={"temperature": 0.1}
+    model_id="anthropic.claude-3-5-sonnet-20241022-v2:0", model_kwargs={"temperature": 0.1}
 )
 
 prompt_for_rag = ChatPromptTemplate.from_messages(
@@ -54,8 +54,12 @@ prompt_for_rag = ChatPromptTemplate.from_messages(
     ]
 )
 
+class Router(TypedDict):
+    next: Literal["aws_personol_health_dashboard_check", "alert_status_check", "FINISH"]
+
 @tool
 def rag_analysis(state: State) -> RagModel:
+# def rag_analysis(state: State) -> Router:
     """
     Perform RAG (Retrieval-Augmented Generation) analysis on the given message.
 
@@ -63,7 +67,6 @@ def rag_analysis(state: State) -> RagModel:
         state (State): The current state of the conversation.
 
     Returns:
-        str: The result of the RAG analysis.
         str: worker to act next.
     """
     chain = retriever | (lambda docs: "\n\n".join(doc.page_content for doc in docs))
@@ -110,9 +113,6 @@ system_prompt_for_rag_analysis = (
     "If it is identified as a known issue, provide the relevant information from the Data from RAG and respond with FINISH."
 )
 
-class Router(TypedDict):
-    next: Literal["aws_personol_health_dashboard_check", "alert_status_check", "FINISH"]
-
 def supervisor_node(state: State) -> Command[Literal["aws_personol_health_dashboard_check","alert_status_check", "__end__"]]:
     messages = [
         {"role": "system", "content": system_prompt_for_supervisor},
@@ -135,8 +135,9 @@ def rag_analysis_node(state: State) -> Command[Literal["supervisor", "__end__"]]
     #     {"role": "system", "content": prompt_for_rag},
     # ] + state["messages"]
     result = rag_agent.invoke(state)
-    # goto = result["next"]
-    goto = result.get("next")
+    # result = rag_agent.invoke({"messages": state["messages"][-1].content})
+    print("\nstructured_response:\n------------------------------------------\n", result["structured_response"])
+    goto = result["structured_response"]["next"]
     print("\ngoto in rag_analysis_node:\n------------------------------------------\n", goto)
     print("\nresponse in rag_analysis_node:\n------------------------------------------\n", result.get("result"))
     print("\nresult in rag_analysis_node:\n------------------------------------------\n", result)

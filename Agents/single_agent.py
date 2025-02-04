@@ -81,7 +81,7 @@ def shell_tool(
 tools = [python_repl_tool, shell_tool]
 tool_node = ToolNode(tools)
 llm = ChatBedrock(
-    model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
+    model_id="anthropic.claude-3-5-sonnet-20241022-v2:0",
     model_kwargs={
         "temperature": 0.1,
         # "max_tokens": 8000,
