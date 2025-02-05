@@ -65,6 +65,7 @@ builder.add_node("rag_agent", rag_graph)
 builder.add_node("aws_phd_agent", aws_phd_graph)
 builder.add_edge(START, "rag_agent")
 builder.add_edge("rag_agent", "supervisor_agent")
+builder.add_edge("aws_phd_agent", "supervisor_agent")
 graph = builder.compile()
 
 # Save the graph as a PNG
@@ -99,7 +100,9 @@ def main():
         "command": "",
         },
         # subgraphs=True,
-        stream_mode="values"))
+        stream_mode="values",
+        config={"recursion_limit": 5},
+        ))
 
 if __name__ == "__main__":
     main()
