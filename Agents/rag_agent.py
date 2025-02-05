@@ -26,7 +26,9 @@ class State(MessagesState):
     command: str = ""
 
 llm = ChatBedrock( # 後日 "anthropic.claude-3-5-sonnet-20241022-v2:0" を試してみる
-    model_id="anthropic.claude-3-5-sonnet-20240620-v1:0", model_kwargs={"temperature": 0.1}
+    model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
+    model_kwargs={"temperature": 0.1},
+    beta_use_converse_api=False,
 )
 
 retriever = AmazonKnowledgeBasesRetriever(
@@ -61,8 +63,8 @@ def rag_analysis(state: State) -> State:
     Perform RAG (Retrieval-Augmented Generation) analysis on the given error message.
     """
     chain = retriever | (lambda docs: "\n\n".join(doc.page_content for doc in docs))
-    print("\nstate before update:\n------------------------------------------\n", state)
-    print("\nstate['messages'][0].content:\n------------------------------------------\n", state["messages"][0].content)
+    print("\nrag_agent state before update:\n------------------------------------------\n", state)
+    print("\nrag_agent state['messages'][0].content:\n------------------------------------------\n", state["messages"][0].content)
     error_message = state["messages"][0].content
     rag_result = chain.invoke(error_message)
     print("\nrag_result:\n-----------------------------------------\n", rag_result)
@@ -72,10 +74,13 @@ def rag_analysis(state: State) -> State:
         "error_message": error_message,
         "data_from_rag": rag_result,
     })
-    print("\nresponse in rag_analysis tool:\n------------------------------------------\n", response)
+    print("\nrag_agent response in rag_analysis tool:\n------------------------------------------\n", response)
     state["known"] = response.known # Stateのknownフィールドを更新
     state["command"] = response.command # Stateのcommandフィールドを更新
-    print("\nstate after update:\n------------------------------------------\n", state)
+    # state["system_name"] = "Goku" # test（Supervisor AgentのStateがこの値に上書きされることを確認）
+    # state["region"] = "us-west-2" # test（Supervisor AgentのStateがこの値に上書きされることを確認）
+    # state["account_id"] = "2323232323" # test（Supervisor AgentのStateがこの値に上書きされることを確認）
+    print("\nrag_agent state after update:\n------------------------------------------\n", state)
     return state
 
 tools = [rag_analysis]
@@ -85,8 +90,8 @@ tools_by_name = {tool.name: tool for tool in tools} # 複数のツールがあ�
 
 def tool_node(state: State):
     outputs = []
-    print('\nstate["messages"][-1] in tool_node:\n------------------------------------\n', state["messages"][-1])
-    print("\nstate in tool_node:\n--------------------------------------------\n", state)
+    print('\nrag_agent state["messages"][-1] in tool_node:\n------------------------------------\n', state["messages"][-1])
+    print("\nrag_agent state in tool_node:\n--------------------------------------------\n", state)
     for tool_call in state["messages"][-1].tool_calls:
         tool_result = tools_by_name[tool_call["name"]].invoke({"state": state})
         state.update(tool_result) # Stateを更新
@@ -109,8 +114,8 @@ def call_model( # これがAgent
         "You are a helpful assistant that compares the given Error Message with the Data from RAG to determine whether the Error Message corresponds to a known issue."
     )
     response = llm_model.invoke([system_prompt] + state["messages"], config)
-    print("\nresponse in call_model:\n----------------------------------------------\n", response)
-    print("\nstate in call_model:\n----------------------------------------------\n", state)
+    print("\nrag_agent response in call_model:\n----------------------------------------------\n", response)
+    print("\nrag_agent state in call_model:\n----------------------------------------------\n", state)
 
     state["messages"] = [response]
     return state # 次のNodeに入力としてStateを渡す。（他のフィールドはそのまま残るように、state 全体を返す）
@@ -120,8 +125,8 @@ def should_continue(state: State):
     messages = state["messages"]
     last_message = messages[-1]
 
-    print("\n[should_continue] state:\n----------------------------------\n", state)
-    print("\n[should_continue] last_message:\n----------------------------------\n", last_message)
+    print("\nrag_agent [should_continue] state:\n----------------------------------\n", state)
+    print("\nrag_agent [should_continue] last_message:\n----------------------------------\n", last_message)
     # If there is no function call, then we finish
     
     if not last_message.tool_calls:
@@ -130,7 +135,7 @@ def should_continue(state: State):
     else:
         return "continue"
 
-builder = StateGraph(State)
+builder = StateGraph(state_schema=State)
 builder.add_node("rag_agent", call_model)
 builder.add_node("rag_tools", tool_node)
 builder.set_entry_point("rag_agent")
@@ -176,7 +181,6 @@ def main():
         "known": False,
         "command": "",
         }, stream_mode="values"))
-
 
 if __name__ == "__main__":
     main()
