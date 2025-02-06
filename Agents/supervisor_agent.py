@@ -128,8 +128,8 @@ def main():
         "command": "",
     })
 
-    print("\nanalysis_results in print_stream:\n------------------------------------\n", final_state["analysis_results"])
-    print("\ncommand in print_stream:\n------------------------------------\n", final_state["command"])
+    print("\nFinal analysis_results:\n------------------------------------\n", final_state["analysis_results"])
+    print("\nFinal command:\n------------------------------------\n", final_state["command"])
 
     run_command(final_state["command"])
 
