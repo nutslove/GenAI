@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 import os
 from rag_agent import graph as rag_graph
 from aws_phd_agent import graph as aws_phd_graph
+from execute_command_agent import graph as execute_command_graph
 from state import State as SupervisorState
 
 # class State(MessagesState):
@@ -49,14 +50,7 @@ system_prompt_for_supervisor = (
 )
 
 def supervisor_node(state: SupervisorState) -> Command[Literal["aws_phd_agent", "__end__"]]:
-# def supervisor_node(state: State) -> Command:
     print("\nstate['messages'][0] in supervisor_node:\n------------------------------------\n", state["messages"][0])
-    # messages = [{"role": "system", "content": system_prompt_for_supervisor, "role": "user", "content": state["messages"][0].content}] # state["messages"][0].contentには最初に入力されたエラーメッセージが入っている
-
-    # messages = [
-    #     {"role": "system", "content": system_prompt_for_supervisor},
-    #     {"role": "user", "content": state["messages"][-1].content}
-    # ]
 
     messages = [
         {"role": "system", "content": system_prompt_for_supervisor},
@@ -64,14 +58,15 @@ def supervisor_node(state: SupervisorState) -> Command[Literal["aws_phd_agent", 
 
     print("\nstate in supervisor_node:\n------------------------------------\n", state)
     response = llm.with_structured_output(SupervisorResponse).invoke(messages)
-    state["analysis_results"] = response["analysis_results"]
-    state["command"] = response["command"]
     goto = response["next"]
     print("\nnext in supervisor_node:\n------------------------------------\n", goto)
     # print("\ncommand in supervisor_node:\n------------------------------------\n", response["command"])
     # print("\nanalysis_results in supervisor_node:\n------------------------------------\n", response["analysis_results"])
     if goto == "FINISH" or (state["known"] and state["command"] != ""):
         goto = END
+    else:
+        state["analysis_results"] = response["analysis_results"]
+        state["command"] = response["command"]
     return Command(
         update={"analysis_results": state["analysis_results"], "command": state["command"]},
         goto=goto
@@ -108,8 +103,22 @@ def print_stream(stream):
 
     print("Final state saved to supervisor_final_state.txt")
 
+    print("\nanalysis_results in print_stream:\n------------------------------------\n", final_state["analysis_results"])
+    print("\ncommand in print_stream:\n------------------------------------\n", final_state["command"])
+    return final_state["command"]
+
+def run_command(command):
+    execute_or_not = input("Do you want to execute the command? (yes/no): ")
+    if execute_or_not == "yes":
+        execute_command_graph.invoke(
+            {
+                "messages": [HumanMessage(content=command)],
+            }
+        )
+
+
 def main():
-    print_stream(graph.stream({
+    final_state = graph.invoke({
         "messages": [("user", input("input error message:\n"))],
         "system_name": "Factory",
         "region": "ap-northeast-1",
@@ -117,11 +126,26 @@ def main():
         "known": False,
         "analysis_results": "",
         "command": "",
-        },
-        # subgraphs=True,
-        stream_mode="values",
-        config={"recursion_limit": 10},
-    ))
+    })
+
+    print("\nanalysis_results in print_stream:\n------------------------------------\n", final_state["analysis_results"])
+    print("\ncommand in print_stream:\n------------------------------------\n", final_state["command"])
+
+    run_command(final_state["command"])
+
+    # command = print_stream(graph.stream({
+    #     "messages": [("user", input("input error message:\n"))],
+    #     "system_name": "Factory",
+    #     "region": "ap-northeast-1",
+    #     "account_id": "0123456789",
+    #     "known": False,
+    #     "analysis_results": "",
+    #     "command": "",
+    #     },
+    #     # subgraphs=True,
+    #     stream_mode="values",
+    #     config={"recursion_limit": 10},
+    # ))
 
 if __name__ == "__main__":
     main()

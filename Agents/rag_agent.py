@@ -109,7 +109,7 @@ def tool_node(state: SupervisorState):
     state["messages"] = outputs
     return state # 次のNodeに入力としてStateを渡す
 
-def call_model( # これがAgent
+def call_llm( # これがAgent
     state: SupervisorState,
     config: RunnableConfig,
 ):
@@ -121,8 +121,8 @@ def call_model( # これがAgent
         f"If this is a known issue but {state['command']} is empty, don't say anything else - just say exactly \"This is a known issue but no resolution commands are available.\""
     )
     response = llm_model.invoke([system_prompt] + state["messages"], config)
-    print("\nrag_agent response in call_model:\n----------------------------------------------\n", response)
-    print("\nrag_agent state in call_model:\n----------------------------------------------\n", state)
+    print("\nrag_agent response in call_llm:\n----------------------------------------------\n", response)
+    print("\nrag_agent state in call_llm:\n----------------------------------------------\n", state)
 
     state["messages"] = [response]
     return state # 次のNodeに入力としてStateを渡す。（他のフィールドはそのまま残るように、state 全体を返す）
@@ -143,7 +143,7 @@ def should_continue(state: SupervisorState):
         return "continue"
 
 builder = StateGraph(state_schema=SupervisorState)
-builder.add_node("rag_agent", call_model)
+builder.add_node("rag_agent", call_llm)
 builder.add_node("rag_tools", tool_node)
 builder.set_entry_point("rag_agent")
 builder.add_conditional_edges(
