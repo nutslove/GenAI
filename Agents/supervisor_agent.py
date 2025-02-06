@@ -15,13 +15,15 @@ from pydantic import BaseModel, Field
 import os
 from rag_agent import graph as rag_graph
 from aws_phd_agent import graph as aws_phd_graph
+from state import State as SupervisorState
 
-class State(MessagesState):
-    system_name: str = ""
-    region: str = "ap-northeast-1"
-    account_id: str = ""
-    known: bool = False
-    command: str = ""
+# class State(MessagesState):
+#     system_name: str = ""
+#     region: str = "ap-northeast-1"
+#     account_id: str = ""
+#     known: bool = False
+#     analysis_results: str = ""
+#     command: list[str] = []
 
 llm = ChatBedrock(
     model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
@@ -29,33 +31,53 @@ llm = ChatBedrock(
     beta_use_converse_api=False,
 )
 
-class Router(TypedDict):
-    next: Literal["aws_phd_agent", "FINISH"]
+class SupervisorResponse(TypedDict):
+    next: Literal["aws_phd_agent", "FINISH"] = Field(..., description="The next agent to act.")
+    analysis_results: str = Field(..., description="The root cause analysis of the error message.")
+    command: str = Field(..., description="The command to execute.")
 
 members = ["aws_phd_agent"]
 options = members + ["FINISH"]
 
 system_prompt_for_supervisor = (
-    "You are a supervisor tasked with managing a conversation between the"
-    f" following workers: {members}. Given the following user request,"
-    " respond with the worker to act next. Each worker will perform a"
-    " task and respond with their results and status. When finished,"
-    " respond with FINISH."
+    f"You are a supervisor tasked with managing a conversation between the following workers: {members}.\n"
+    f"Given the following user request and an associated error message, perform a root cause analysis of the error message and propose command(s) to resolve the issue using these workers.\n"
+    "In your response, identify which worker should act next and specify what to execute next.\n"
+    f"Ensure that the agents listed in {members} are utilized to address the problem, and when the process is complete, include FINISH in your answer in the `next` field.\n"
+    f"You must provide analysis results in the `analysis_results` field for the error message and the information provided by the previous worker.\n"
+    f"Also, you must provide a command in the `command` field in a ready-to-run format like 'aws ecs update-service --cluster <CLUSTER_NAME> --service <SERVICE_NAME> --task-definition <TASK_DEFINITION_NAME>:<NEW_REVISION>'."
 )
 
-def supervisor_node(state: State) -> Command[Literal["aws_phd_agent", "__end__"]]:
+def supervisor_node(state: SupervisorState) -> Command[Literal["aws_phd_agent", "__end__"]]:
 # def supervisor_node(state: State) -> Command:
     print("\nstate['messages'][0] in supervisor_node:\n------------------------------------\n", state["messages"][0])
-    messages = [{"role": "system", "content": system_prompt_for_supervisor, "role": "user", "content": state["messages"][0].content}] # state["messages"][0].contentには最初に入力されたエラーメッセージが入っている
+    # messages = [{"role": "system", "content": system_prompt_for_supervisor, "role": "user", "content": state["messages"][0].content}] # state["messages"][0].contentには最初に入力されたエラーメッセージが入っている
+
+    # messages = [
+    #     {"role": "system", "content": system_prompt_for_supervisor},
+    #     {"role": "user", "content": state["messages"][-1].content}
+    # ]
+
+    messages = [
+        {"role": "system", "content": system_prompt_for_supervisor},
+    ] + state["messages"] + [{"role": "user", "content": "Based on the conversation history, please analyze the cause and suggest appropriate commands to address the issue."}]
+
     print("\nstate in supervisor_node:\n------------------------------------\n", state)
-    response = llm.with_structured_output(Router).invoke(messages)
+    response = llm.with_structured_output(SupervisorResponse).invoke(messages)
+    state["analysis_results"] = response["analysis_results"]
+    state["command"] = response["command"]
     goto = response["next"]
     print("\nnext in supervisor_node:\n------------------------------------\n", goto)
+    # print("\ncommand in supervisor_node:\n------------------------------------\n", response["command"])
+    # print("\nanalysis_results in supervisor_node:\n------------------------------------\n", response["analysis_results"])
     if goto == "FINISH" or (state["known"] and state["command"] != ""):
         goto = END
-    return Command(goto=goto)
+    return Command(
+        update={"analysis_results": state["analysis_results"], "command": state["command"]},
+        goto=goto
+    )
 
-builder = StateGraph(state_schema=State)
+builder = StateGraph(state_schema=SupervisorState)
 builder.add_node("supervisor_agent", supervisor_node)
 builder.add_node("rag_agent", rag_graph)
 builder.add_node("aws_phd_agent", aws_phd_graph)
@@ -93,11 +115,12 @@ def main():
         "region": "ap-northeast-1",
         "account_id": "0123456789",
         "known": False,
+        "analysis_results": "",
         "command": "",
         },
         # subgraphs=True,
         stream_mode="values",
-        config={"recursion_limit": 5},
+        config={"recursion_limit": 10},
     ))
 
 if __name__ == "__main__":

@@ -18,13 +18,14 @@ from pydantic import BaseModel, Field
 import os
 import json
 import random
+from state import State as SupervisorState
 
-class State(MessagesState):
-    system_name: str = ""
-    region: str = "ap-northeast-1"
-    account_id: str = ""
-    known: bool = False
-    command: str = ""
+# class State(MessagesState):
+#     system_name: str = ""
+#     region: str = "ap-northeast-1"
+#     account_id: str = ""
+#     known: bool = False
+#     command: str = ""
 
 llm = ChatBedrock( # 後日 "anthropic.claude-3-5-sonnet-20241022-v2:0" を試してみる
     model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
@@ -33,8 +34,7 @@ llm = ChatBedrock( # 後日 "anthropic.claude-3-5-sonnet-20241022-v2:0" を試�
 )
 
 @tool
-# def aws_personal_health_dashboard_check(state: State) -> str:
-def aws_personal_health_dashboard_check(state: State):
+def aws_personal_health_dashboard_check(state: SupervisorState):
     """
     Check AWS Personal Health Dashboard to see if there are any AWS service disruptions.
     """
@@ -45,7 +45,7 @@ llm_model = llm.bind_tools(tools)
 
 tools_by_name = {tool.name: tool for tool in tools} # 複数のツールがある場合に備えて辞書にしておく
 
-def tool_node(state: State):
+def tool_node(state: SupervisorState):
     outputs = []
     print('\naws_phd_agent state["messages"][-1] in tool_node:\n------------------------------------\n', state["messages"][-1])
     print("\naws_phd_agent state in tool_node:\n--------------------------------------------\n", state)
@@ -64,7 +64,7 @@ def tool_node(state: State):
     return state # 次のNodeに入力としてStateを渡す
 
 def call_model( # これがAgent
-    state: State,
+    state: SupervisorState,
     config: RunnableConfig,
 ):
     # this is similar to customizing the create_react_agent with 'prompt' parameter, but is more flexible
@@ -80,7 +80,7 @@ def call_model( # これがAgent
     except Exception as e:
         print("\nError occurred in aws_phd_agent call_model llm_model.invoke:\n----------------------------------------------\n", e)
     finally:
-        response = llm_model.invoke([system_prompt] + state["messages"] + [HumanMessage(state["messages"][0])], config)
+        response = llm_model.invoke([system_prompt] + state["messages"] + [HumanMessage(state["messages"][0].content)], config)
     print("\naws_phd_agent response in call_model:\n----------------------------------------------\n", response)
     print("\naws_phd_agent state in call_model:\n----------------------------------------------\n", state)
 
@@ -88,7 +88,7 @@ def call_model( # これがAgent
     return state # 次のNodeに入力としてStateを渡す。（他のフィールドはそのまま残るように、state 全体を返す）
 
 # Define the conditional edge that determines whether to continue or not
-def should_continue(state: State):
+def should_continue(state: SupervisorState):
     messages = state["messages"]
     last_message = messages[-1]
 
@@ -102,7 +102,7 @@ def should_continue(state: State):
     else:
         return "continue"
 
-builder = StateGraph(state_schema=State)
+builder = StateGraph(state_schema=SupervisorState)
 builder.add_node("aws_phd_agent", call_model)
 builder.add_node("aws_phd_tools", tool_node)
 builder.set_entry_point("aws_phd_agent")
@@ -146,6 +146,7 @@ def main():
         "region": "ap-northeast-1",
         "account_id": "1234567890",
         "known": False,
+        "analysis_results": "",
         "command": "",
         },
         stream_mode="values",
