@@ -1,6 +1,6 @@
 langchain-core==0.3.31
 langchain-community==0.3.15
 langgraph==0.2.69
-langchain-aws==0.2.10
+langchain-aws==0.2.12
 langchain_experimental
 IPython==8.18.1
