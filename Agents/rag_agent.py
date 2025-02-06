@@ -47,7 +47,7 @@ prompt_for_rag = ChatPromptTemplate.from_messages(
             "You are a helpful assistant that compares the given Error Message with the Data from RAG to determine whether the Error Message corresponds to a known issue.\n\
             If it is identified as a known issue, provide, set `known` to `True`.\n\
             Also, if there is a specific command to solve the issue in the data from RAG, set the command to `command`.\n\
-            Don't set anything to `command` if there is no specific description of a command to solve the issue in the data from RAG.",
+            Don't set any string that includes '<UNKNOWN>' to `command` if there is no specific description of a command to solve the issue in the data from RAG.",
         ),
         ("human", "# Error Message\n{error_message}\n\n# Data from RAG\n{data_from_rag}"),
     ]
@@ -76,7 +76,10 @@ def rag_analysis(state: State) -> State:
     })
     print("\nrag_agent response in rag_analysis tool:\n------------------------------------------\n", response)
     state["known"] = response.known # Stateのknownフィールドを更新
-    state["command"] = response.command # Stateのcommandフィールドを更新
+    if "unknown" in response.command.lower(): # AIがcommandに'<UNKNOWN>'を入れることがあるので、それを除外
+        state["command"] = ""
+    else:
+        state["command"] = response.command # Stateのcommandフィールドを更新
     # state["system_name"] = "Goku" # test（Supervisor AgentのStateがこの値に上書きされることを確認）
     # state["region"] = "us-west-2" # test（Supervisor AgentのStateがこの値に上書きされることを確認）
     # state["account_id"] = "2323232323" # test（Supervisor AgentのStateがこの値に上書きされることを確認）
@@ -94,7 +97,7 @@ def tool_node(state: State):
     print("\nrag_agent state in tool_node:\n--------------------------------------------\n", state)
     for tool_call in state["messages"][-1].tool_calls:
         tool_result = tools_by_name[tool_call["name"]].invoke({"state": state})
-        state.update(tool_result) # Stateを更新
+        state.update(tool_result) # Stateを更新（必要！toolが呼ばれたときにtoolの中で更新したStateを反映）
         outputs.append(
             ToolMessage(
                 content=tool_result,
@@ -111,7 +114,8 @@ def call_model( # これがAgent
 ):
     # this is similar to customizing the create_react_agent with 'prompt' parameter, but is more flexible
     system_prompt = SystemMessage(
-        "You are a helpful assistant that compares the given Error Message with the Data from RAG to determine whether the Error Message corresponds to a known issue."
+        "You are a helpful assistant that compares the given Error Message with the Data from RAG to determine whether the Error Message corresponds to a known issue.\n"
+        "Use tools to analyze the Error Message and provide the results."
     )
     response = llm_model.invoke([system_prompt] + state["messages"], config)
     print("\nrag_agent response in call_model:\n----------------------------------------------\n", response)
@@ -167,10 +171,10 @@ def print_stream(stream):
         else:
             message.pretty_print()
 
-    with open("final_state.txt", "w", encoding="utf-8") as f:
+    with open("rag_final_state.txt", "w", encoding="utf-8") as f:
         f.write(pformat(final_state))
 
-    print("Final state saved to final_state.txt")
+    print("Final state saved to rag_final_state.txt")
 
 def main():
     print_stream(graph.stream({

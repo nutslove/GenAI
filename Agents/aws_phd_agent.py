@@ -34,30 +34,24 @@ llm = ChatBedrock( # 後日 "anthropic.claude-3-5-sonnet-20241022-v2:0" を試�
 
 @tool
 # def aws_personal_health_dashboard_check(state: State) -> str:
-def aws_personal_health_dashboard_check(state: State) -> State: # (4)
+def aws_personal_health_dashboard_check(state: State):
     """
     Check AWS Personal Health Dashboard to see if there are any AWS service disruptions.
     """
-
-    state["messages"] += [AIMessage(content=random.choice(["ECS Service is running", "ECS Service is down"]))]
-    state.update({"messages": state["messages"]})
-    print("\naws_phd_agent state['messages'] in aws_personal_health_dashboard_check:\n------------------------------------\n", state["messages"])
-    return state
-    # return random.choice(["ECS Service is running", "ECS Service is down"])
+    return random.choice(["ECS Service is running", "ECS Service is down"]) # test
 
 tools = [aws_personal_health_dashboard_check]
 llm_model = llm.bind_tools(tools)
 
 tools_by_name = {tool.name: tool for tool in tools} # 複数のツールがある場合に備えて辞書にしておく
 
-def tool_node(state: State): # (3)
+def tool_node(state: State):
     outputs = []
     print('\naws_phd_agent state["messages"][-1] in tool_node:\n------------------------------------\n', state["messages"][-1])
     print("\naws_phd_agent state in tool_node:\n--------------------------------------------\n", state)
     for tool_call in state["messages"][-1].tool_calls:
         tool_result = tools_by_name[tool_call["name"]].invoke({"state": state})
         print("\nBefore aws_phd_agent state['messages'] in tool_node:\n------------------------------------\n", state["messages"])
-        # state.update(tool_result) # Stateを更新
         outputs.append(
             ToolMessage(
                 content=tool_result,
@@ -69,22 +63,24 @@ def tool_node(state: State): # (3)
     print("\nAfter aws_phd_agent state['messages'] in tool_node:\n------------------------------------\n", state["messages"])
     return state # 次のNodeに入力としてStateを渡す
 
-def call_model( # これがAgent (1)
+def call_model( # これがAgent
     state: State,
     config: RunnableConfig,
 ):
     # this is similar to customizing the create_react_agent with 'prompt' parameter, but is more flexible
     system_prompt = SystemMessage(
         "You are a helpful assistant that checks AWS Personal Health Dashboard to see if there are any AWS service disruptions.\n"
+        "If there are any disruptions, don't add any commentary or reasoning - just relay the exact information you get.\n"
+        f"If there are no disruptions, don't say anything else - just say exactly 'there are no disruptions in the {state['region']} region.'\n"
         f"Account ID: {state['account_id']}\n"
         f"Region: {state['region']}"
     )
-    # input = HumanMessage(
-    #     f"Account ID: {state['account_id']}\n"
-    #     f"Region: {state['region']}"
-    # )
-    # response = llm_model.invoke([system_prompt] + [input], config)
-    response = llm_model.invoke([system_prompt] + [state["messages"][0]], config)
+    try:
+        response = llm_model.invoke([system_prompt] + state["messages"], config)
+    except Exception as e:
+        print("\nError occurred in aws_phd_agent call_model llm_model.invoke:\n----------------------------------------------\n", e)
+    finally:
+        response = llm_model.invoke([system_prompt] + state["messages"] + [HumanMessage(state["messages"][0])], config)
     print("\naws_phd_agent response in call_model:\n----------------------------------------------\n", response)
     print("\naws_phd_agent state in call_model:\n----------------------------------------------\n", state)
 
@@ -92,7 +88,7 @@ def call_model( # これがAgent (1)
     return state # 次のNodeに入力としてStateを渡す。（他のフィールドはそのまま残るように、state 全体を返す）
 
 # Define the conditional edge that determines whether to continue or not
-def should_continue(state: State): # (2)
+def should_continue(state: State):
     messages = state["messages"]
     last_message = messages[-1]
 
@@ -151,7 +147,10 @@ def main():
         "account_id": "1234567890",
         "known": False,
         "command": "",
-        }, stream_mode="values"))
+        },
+        stream_mode="values",
+        config={"recursion_limit": 5},
+    ))
 
 if __name__ == "__main__":
     main()
