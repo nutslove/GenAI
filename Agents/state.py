@@ -6,4 +6,5 @@ class State(MessagesState):
     account_id: str = ""
     known: bool = False
     analysis_results: str = ""
+    # read_only: bool = True
     command: str = ""

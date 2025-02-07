@@ -19,13 +19,6 @@ import json
 import random
 from state import State as SupervisorState
 
-# class State(MessagesState):
-#     system_name: str = ""
-#     region: str = "ap-northeast-1"
-#     account_id: str = ""
-#     known: bool = False
-#     command: str = ""
-
 llm = ChatBedrock( # 後日 "anthropic.claude-3-5-sonnet-20241022-v2:0" を試してみる
     model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
     model_kwargs={"temperature": 0.1},
