@@ -7,14 +7,20 @@ from langchain_aws import ChatBedrock
 from langgraph.graph import StateGraph, MessagesState
 from langgraph.prebuilt import ToolNode
 from typing import Literal, Annotated
+from typing_extensions import TypedDict
 import subprocess
 import os
+from pydantic import BaseModel, Field
 from IPython.display import display, Image
 from rag_agent import graph as rag_graph
 from state import State
 
 # This executes code locally, which can be unsafe
 repl = PythonREPL()
+
+class Response(TypedDict):
+    analysis_results: str = Field(..., description="The root cause analysis of the error message.")
+    final_command: str = Field(..., description="The final command to execute to resolve the issue.")
 
 @tool
 def python_repl_tool(
@@ -63,15 +69,14 @@ def should_continue(state: State) -> Literal["command_run_tools", "__end__"]:
     return "__end__"
 
 system_prompt = f"""
-You are a helpful assistant that can execute commands using the tools provided.
+You are a helpful assistant that can execute commands using the tools provided to check the status of resources you need to verify while troubleshooting the issue.
 You can use the following tools: python_repl_tool, shell_tool.
-Given the following user request and an associated error message, perform a root cause analysis of the error message and propose command(s) to resolve the issue using these workers.
-You can use "execute_command_agent" to check the status of resources you need to verify while troubleshooting the issue.
+Given the following user request and an associated error message, perform a root cause analysis of the error message and propose command(s) to resolve the issue.
+You can use read-only/reference commands like 'aws ecs describe-services --cluster <CLUSTER_NAME> --services <SERVICE_NAME>' to check the status of an ECS service or 'aws ecs list-clusters' to confirm the name of the cluster while generating the final command.
 For example, you can use the command 'aws ecs describe-services --cluster <CLUSTER_NAME> --services <SERVICE_NAME>' to check the status of an ECS service or 'aws ecs list-clusters' to confirm the name of the cluster.
-And if you need to verify something using the 'execute_command_agent' worker in the middle of generating the `final_command` to resolve the issue, please put the verification command in the `status_check_command` field.
-Ensure that `status_check_command` or `final_command` field is needed to execute 'execute_command_agent' worker.,
 In the final answer, you must provide analysis results in the `analysis_results` field for the error message and the information provided by the previous worker.
-In the final answer, you must also provide a command in the `final_command` field in a ready-to-run format like 'aws ecs update-service --cluster <CLUSTER_NAME> --service <SERVICE_NAME> --task-definition <TASK_DEFINITION_NAME>:<NEW_REVISION>'.
+In the final answer, you must also provide a command to update in the `final_command` field in a ready-to-run format like 'aws ecs update-service --cluster <CLUSTER_NAME> --service <SERVICE_NAME> --task-definition <TASK_DEFINITION_NAME>:<NEW_REVISION>'.
+
 """
 
 def call_llm(state: State):
@@ -79,11 +84,11 @@ def call_llm(state: State):
     print("\nexecute_command_agent [call_llm] State:\n-----------------------------------\n", state, "\n-----------------------------------")
 
     try:
-        response = llm.invoke([systemprompt] + state['messages'])
+        response = llm.with_structured_output(Response).invoke([systemprompt] + state['messages'])
     except Exception as e:
         print("\nError occurred in aws_phd_agent call_llm llm_model.invoke:\n----------------------------------------------\n", e)
     finally:
-        response = llm.invoke([system_prompt] + state["messages"] + [HumanMessage(state["messages"][0].content)])
+        response = llm.with_structured_output(Response).invoke([system_prompt] + state["messages"] + [HumanMessage(state["messages"][0].content)])
     return {"messages": [response]}
 
 workflow = StateGraph(State)
@@ -110,7 +115,6 @@ def main():
         "known_issue": False,
         "analysis_results": "",
         "predefined_command": "",
-        "status_check_command": "",
         "final_command": "",
     })
 
