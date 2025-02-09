@@ -17,7 +17,7 @@ from IPython.display import display, Image
 from pydantic import BaseModel, Field
 import os
 import json
-from state import State as SupervisorState
+from state import State
 
 llm = ChatBedrock( # 後日 "anthropic.claude-3-5-sonnet-20241022-v2:0" を試してみる
     model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
@@ -52,7 +52,7 @@ class RagResponse(BaseModel):
     predefined_command: str = Field(..., description="The predefined command to execute.")
 
 @tool
-def rag_analysis(state: SupervisorState) -> SupervisorState:
+def rag_analysis(state: State) -> State:
     """
     Perform RAG (Retrieval-Augmented Generation) analysis on the given error message.
     """
@@ -85,7 +85,7 @@ llm_model = llm.bind_tools(tools)
 
 tools_by_name = {tool.name: tool for tool in tools} # 複数のツールがある場合に備えて辞書にしておく
 
-def tool_node(state: SupervisorState):
+def tool_node(state: State):
     outputs = []
     print('\nrag_agent state["messages"][-1] in tool_node:\n------------------------------------\n', state["messages"][-1])
     print("\nrag_agent state in tool_node:\n--------------------------------------------\n", state)
@@ -103,7 +103,7 @@ def tool_node(state: SupervisorState):
     return state # 次のNodeに入力としてStateを渡す
 
 def call_llm( # これがAgent
-    state: SupervisorState,
+    state: State,
     config: RunnableConfig,
 ):
     # this is similar to customizing the create_react_agent with 'prompt' parameter, but is more flexible
@@ -111,7 +111,7 @@ def call_llm( # これがAgent
         "You are a helpful assistant that compares the given Error Message with the Data from RAG to determine whether the Error Message corresponds to a known issue.\n"
         "Use tools to analyze the Error Message and provide the results.\n"
         "If this is not a known issue, don't say anything else - just say exactly \"This is not a known issue\".\n"
-        f"If this is a known issue but {state['predefined_command']} is empty, don't say anything else - just say exactly \"This is a known issue but no resolution commands are available.\""
+        f"If this is a known issue but 'predefined_command' is empty, don't say anything else - just say exactly \"This is a known issue but no resolution commands are available.\""
     )
     response = llm_model.invoke([system_prompt] + state["messages"], config)
     print("\nrag_agent response in call_llm:\n----------------------------------------------\n", response)
@@ -121,7 +121,7 @@ def call_llm( # これがAgent
     return state # 次のNodeに入力としてStateを渡す。（他のフィールドはそのまま残るように、state 全体を返す）
 
 # Define the conditional edge that determines whether to continue or not
-def should_continue(state: SupervisorState):
+def should_continue(state: State):
     messages = state["messages"]
     last_message = messages[-1]
 
@@ -135,7 +135,7 @@ def should_continue(state: SupervisorState):
     else:
         return "continue"
 
-builder = StateGraph(state_schema=SupervisorState)
+builder = StateGraph(state_schema=State)
 builder.add_node("rag_agent", call_llm)
 builder.add_node("rag_tools", tool_node)
 builder.set_entry_point("rag_agent")
