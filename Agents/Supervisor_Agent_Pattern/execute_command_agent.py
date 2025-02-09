@@ -66,7 +66,12 @@ def call_llm(state: MessagesState):
     )
     print("\nexecute_command_agent [call_llm] State:\n-----------------------------------\n", state, "\n-----------------------------------")
 
-    response = llm.invoke([system_prompt] + state['messages'])
+    try:
+        response = llm.invoke([system_prompt] + state['messages'])
+    except Exception as e:
+        print("\nError occurred in aws_phd_agent call_llm llm_model.invoke:\n----------------------------------------------\n", e)
+    finally:
+        response = llm.invoke([system_prompt] + state["messages"] + [HumanMessage(state["status_check_command"])])
     return {"messages": [response]}
 
 workflow = StateGraph(MessagesState)

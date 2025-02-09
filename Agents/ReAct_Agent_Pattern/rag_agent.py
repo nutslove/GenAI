@@ -39,17 +39,17 @@ prompt_for_rag = ChatPromptTemplate.from_messages(
         (
             "system",
             "You are a helpful assistant that compares the given Error Message with the Data from RAG to determine whether the Error Message corresponds to a known issue.\n\
-            If it is identified as a known issue, provide, set `known` to `True`.\n\
-            Also, if there is a specific command to solve the issue in the data from RAG, set the command to `command`.\n\
-            Don't set any string that includes '<UNKNOWN>' to `command` if there is no specific description of a command to solve the issue in the data from RAG.",
+            If it is identified as a known issue, provide, set `known_issue` to `True`.\n\
+            Also, if there is a specific command to solve the issue in the data from RAG, set the command to `predefined_command`.\n\
+            Don't set any string that includes '<UNKNOWN>' to `predefined_command` if there is no specific description of a command to solve the issue in the data from RAG.",
         ),
         ("human", "# Error Message\n{error_message}\n\n# Data from RAG\n{data_from_rag}"),
     ]
 )
 
 class RagResponse(BaseModel):
-    known: bool = Field(..., description="Whether the Error Message corresponds to a known issue.")
-    command: str = Field(..., description="The command to execute.")
+    known_issue: bool = Field(..., description="Whether the Error Message corresponds to a known issue.")
+    predefined_command: str = Field(..., description="The predefined command to execute.")
 
 @tool
 def rag_analysis(state: SupervisorState) -> SupervisorState:
@@ -69,11 +69,11 @@ def rag_analysis(state: SupervisorState) -> SupervisorState:
         "data_from_rag": rag_result,
     })
     print("\nrag_agent response in rag_analysis tool:\n------------------------------------------\n", response)
-    state["known"] = response.known # Stateのknownフィールドを更新  
-    if "unknown" in response.command.lower(): # AIがcommandに'<UNKNOWN>'を入れることがあるので、それを除外
-        state["command"] = ""
+    state["known_issue"] = response.known_issue # Stateのknownフィールドを更新  
+    if "unknown" in response.predefined_command.lower(): # AIがcommandに'<UNKNOWN>'を入れることがあるので、それを除外
+        state["predefined_command"] = ""
     else:
-        state["command"] = response.command # Stateのcommandフィールドを更新
+        state["predefined_command"] = response.predefined_command # Stateのcommandフィールドを更新
     # state["system_name"] = "Goku" # test（Supervisor AgentのStateがこの値に上書きされることを確認）
     # state["region"] = "us-west-2" # test（Supervisor AgentのStateがこの値に上書きされることを確認）
     # state["account_id"] = "2323232323" # test（Supervisor AgentのStateがこの値に上書きされることを確認）
@@ -111,7 +111,7 @@ def call_llm( # これがAgent
         "You are a helpful assistant that compares the given Error Message with the Data from RAG to determine whether the Error Message corresponds to a known issue.\n"
         "Use tools to analyze the Error Message and provide the results.\n"
         "If this is not a known issue, don't say anything else - just say exactly \"This is not a known issue\".\n"
-        f"If this is a known issue but {state['command']} is empty, don't say anything else - just say exactly \"This is a known issue but no resolution commands are available.\""
+        f"If this is a known issue but {state['predefined_command']} is empty, don't say anything else - just say exactly \"This is a known issue but no resolution commands are available.\""
     )
     response = llm_model.invoke([system_prompt] + state["messages"], config)
     print("\nrag_agent response in call_llm:\n----------------------------------------------\n", response)
@@ -178,9 +178,10 @@ def main():
         "system_name": "Goku",
         "region": "ap-northeast-1",
         "account_id": "1234567890",
-        "known": False,
+        "known_issue": False,
         "analysis_results": "",
-        "command": "",
+        "predefined_command": "",
+        "final_command": "",
         }, stream_mode="values"))
 
 if __name__ == "__main__":
