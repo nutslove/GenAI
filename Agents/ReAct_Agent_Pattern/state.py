@@ -3,7 +3,7 @@ from pydantic import Field, BaseModel
 from typing_extensions import TypedDict
 
 # class Response(TypedDict):
-class Response(BaseModel):
+class Response(BaseModel): # Stateの中で使う場合はTypedDictではエラーが出るのでBaseModelに変更
     analysis_results: str = Field(..., description="The root cause analysis of the error message.")
     final_command: str = Field(..., description="The final command to execute to resolve the issue.")
 
@@ -13,6 +13,4 @@ class State(MessagesState):
     account_id: str = ""
     known_issue: bool = False
     predefined_command: str = ""
-    # analysis_results: str = ""    
-    # final_command: str = ""
     final_response: Response

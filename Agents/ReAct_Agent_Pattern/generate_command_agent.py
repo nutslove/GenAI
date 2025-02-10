@@ -19,10 +19,6 @@ from execute_command_agent import graph as execute_command_graph
 # This executes code locally, which can be unsafe
 repl = PythonREPL()
 
-# class Response(TypedDict):
-#     analysis_results: str = Field(..., description="The root cause analysis of the error message.")
-#     final_command: str = Field(..., description="The final command to execute to resolve the issue.")
-
 @tool
 def python_repl_tool(
     code: Annotated[str, "The python code to execute to generate your chart."],
@@ -89,10 +85,8 @@ def should_continue(state: State) -> Literal["command_run_tools", "respond", "__
     print("\nexecute_command_agent [should_continue] Last message:\n-----------------------------------\n", last_message, "\n-----------------------------------")
     # if state["known_issue"] and state["predefined_command"] != "":
     if state["known_issue"] and state["predefined_command"] != "":
-        # state["final_command"] = state["predefined_command"]
-        # state["analysis_results"] = last_message.content
         state["final_response"].final_command = state["predefined_command"]
-        state["final_response"].analysis_results = messages[-2].content # rag_agentの結果は一つ前のメッセージに入っている
+        state["final_response"].analysis_results = messages[-2].content # rag_agentの結果は最後から２つ前のメッセージに入っている
         return "__end__"
     elif len(last_message.tool_calls) == 1 and last_message.tool_calls[0]["name"] == "Response":
         return "respond"
@@ -159,13 +153,8 @@ def main():
         "account_id": "0123456789",
         "known_issue": False,
         "predefined_command": "",
-        # "analysis_results": "",
-        # "final_command": "",
         "final_response": Response(analysis_results="", final_command="")
     })
-
-    # print("\nFinal analysis_results:\n------------------------------------\n", final_state["analysis_results"])
-    # print("\nFinal command:\n------------------------------------\n", final_state["final_command"])
 
     # print("\nFinal final_response:\n------------------------------------\n", final_state["final_response"])
     print("\nFinal analysis_results:\n------------------------------------\n", final_state["final_response"].analysis_results)

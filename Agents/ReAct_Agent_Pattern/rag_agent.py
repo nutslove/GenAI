@@ -17,7 +17,7 @@ from IPython.display import display, Image
 from pydantic import BaseModel, Field
 import os
 import json
-from state import State
+from state import State, Response
 
 llm = ChatBedrock( # 後日 "anthropic.claude-3-5-sonnet-20241022-v2:0" を試してみる
     model_id="anthropic.claude-3-5-sonnet-20240620-v1:0",
@@ -179,9 +179,8 @@ def main():
         "region": "ap-northeast-1",
         "account_id": "1234567890",
         "known_issue": False,
-        "analysis_results": "",
         "predefined_command": "",
-        "final_command": "",
+        "final_response": Response(analysis_results="", final_command="")
         }, stream_mode="values"))
 
 if __name__ == "__main__":
