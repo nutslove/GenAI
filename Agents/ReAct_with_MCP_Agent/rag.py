@@ -23,6 +23,12 @@ async def create_table_for_vectorstore(pg_engine: PGEngine, table_name: str, vec
         vector_size=vector_size,
     )
 
+async def add_documents_to_vectorstore(store: PGVectorStore, docs: list[Document]):
+    try:
+        await store.aadd_documents(docs)
+    except Exception as e:
+        print(f"Error adding documents to vector store: {e}")
+
 async def main():
   engine = create_async_engine(
     connection,
@@ -43,15 +49,16 @@ async def main():
     embedding_service=embedding,
   )
 
-  docs = [
-    Document(page_content="Apples and oranges"),
-    Document(page_content="Cars and airplanes"),
-    Document(page_content="Train")
-  ]
+  docs = []
+  while True:
+    doc = input("Enter document content (or 'exit' to finish): ")
+    if doc.lower() == 'exit':
+        break
+    docs.append(Document(page_content=doc))
 
-  await store.aadd_documents(docs)
+  await add_documents_to_vectorstore(store, docs)
 
-  query = "I'd like a fruit."
+  query = input("Enter your query: ")
   results = await store.asimilarity_search(
     query,
     k=1
