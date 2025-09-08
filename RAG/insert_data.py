@@ -8,7 +8,8 @@ import asyncio
 
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/home/nutslove/GCP_VertexAI/service-account-key.json"
 
-connection = "postgresql+psycopg://postgres:postgres@localhost:5432/postgres" # postgresql+psycopg://ユーザー名:パスワード@ホスト:ポート/データベース名
+# connection = "postgresql+psycopg://postgres:postgres@localhost:5432/postgres" # postgresql+psycopg://ユーザー名:パスワード@ホスト:ポート/データベース名
+connection = "postgresql+psycopg://postgres:postgres@192.168.0.241:30432/postgres" # postgresql+psycopg://ユーザー名:パスワード@ホスト:ポート/データベース名
 
 async def main():
   engine = create_async_engine(
