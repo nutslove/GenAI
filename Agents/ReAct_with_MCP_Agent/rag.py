@@ -6,10 +6,15 @@ import os
 import uuid
 import asyncio
 
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/home/nutslove/GCP_VertexAI/service-account-key.json"
+vars = {
+    "GOOGLE_APPLICATION_CREDENTIALS": "/home/nutslove/GCP_VertexAI/service-account-key.json",
+    "connection": "postgresql+psycopg://postgres:postgres@192.168.0.241:30432/postgres", # postgresql+psycopg://ユーザー名:パスワード@ホスト:ポート/データベース名
+    # "postgresql+psycopg://postgres:postgres@localhost:5432/postgres" # postgresql+psycopg://ユーザー名:パスワード@ホスト:ポート/データベース名
+    "create_table_for_vectorstore": False
+}
 
-# connection = "postgresql+psycopg://postgres:postgres@localhost:5432/postgres" # postgresql+psycopg://ユーザー名:パスワード@ホスト:ポート/データベース名
-connection = "postgresql+psycopg://postgres:postgres@192.168.0.241:30432/postgres" # postgresql+psycopg://ユーザー名:パスワード@ホスト:ポート/データベース名
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = vars["GOOGLE_APPLICATION_CREDENTIALS"]
+connection = vars["connection"]
 
 async def create_table_for_vectorstore(pg_engine: PGEngine, table_name: str, vector_size: int):
     # Tableを作成するので、初回だけ実行すること
@@ -28,7 +33,8 @@ async def main():
   VECTOR_SIZE = 3072
 
   # Tableを作成するので、初回だけ実行すること
-  await create_table_for_vectorstore(pg_engine, TABLE_NAME, VECTOR_SIZE)
+  if vars["create_table_for_vectorstore"]:
+    await create_table_for_vectorstore(pg_engine, TABLE_NAME, VECTOR_SIZE)
 
   embedding = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
   store = await PGVectorStore.create(
