@@ -185,6 +185,16 @@ services:
     networks:
       shared-network:
 
+  o11y-tool:
+    build:
+      context: ./Tools/o11y
+      dockerfile: Dockerfile
+      no_cache: true
+    container_name: o11y_tool
+    restart: always
+    networks:
+      shared-network:
+
 networks:
   shared-network:
     external: true
