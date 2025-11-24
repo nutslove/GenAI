@@ -8,3 +8,4 @@ google-genai==1.52.0
 sqlalchemy==2.0.44
 langchain-mcp-adapters==0.1.13
 langfuse==3.10.1
+python-dotenv==1.2.1

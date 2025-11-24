@@ -5,4 +5,3 @@ class RCAAgentState(MessagesState):
   alert_occurred_time: str = ""
   metric_list: list = []
   loki_labels_list: str = ""
-  metrics_list: str = ""

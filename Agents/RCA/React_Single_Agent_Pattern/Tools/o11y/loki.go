@@ -21,7 +21,6 @@ var (
 
 // GETパラメータ用にformタグを使用
 type LokiQueryRangeRequest struct {
-	SID       string `form:"sid" binding:"required"`
 	Query     string `form:"query" binding:"required"` // LogQL
 	Start     string `form:"start"`                    // default 1h. nanosecond Unix epoch または RFC3339 フォーマット
 	End       string `form:"end"`                      // default now. nanosecond Unix epoch または RFC3339 フォーマット
@@ -50,12 +49,7 @@ type LokiMetricResult struct {
 	Values [][]interface{}   `json:"values"`
 }
 
-type LokiAllLabelsRequest struct {
-	SID string `form:"sid" binding:"required"`
-}
-
 type LokiLabelValuesRequest struct {
-	SID   string `form:"sid" binding:"required"`
 	Label string `form:"label" binding:"required"`
 }
 
@@ -65,7 +59,6 @@ type LokiLabelsResponse struct {
 }
 
 type LokiSelectorStreamsRequest struct {
-	SID      string `form:"sid" binding:"required"`
 	Selector string `form:"selector" binding:"required"`
 }
 
@@ -99,8 +92,6 @@ func LokiQueryRange(c *gin.Context) {
 	if request.Direction != "" {
 		queryParams.Add("direction", request.Direction)
 	}
-
-	slog.Info("LogQL Request:", "sid", request.SID, "logql", request.Query)
 
 	fullUrl := fmt.Sprintf("%s/query_range?%s", LokiEndpoint, queryParams.Encode())
 
@@ -207,15 +198,6 @@ func LokiQueryRange(c *gin.Context) {
 }
 
 func LokiGetAllLabels(c *gin.Context) {
-	var request LokiAllLabelsRequest
-	if err := c.ShouldBindQuery(&request); err != nil {
-		slog.Error("failed to bind query parameters", "error", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid query parameters"})
-		return
-	}
-
-	slog.Info("Get All Labels Request:", "sid", request.SID)
-
 	fullUrl := fmt.Sprintf("%s/labels", LokiEndpoint)
 
 	req, err := http.NewRequest("GET", fullUrl, nil)
@@ -263,8 +245,6 @@ func LokiGetLabelValues(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid query parameters"})
 		return
 	}
-
-	slog.Info("Get Label Values Request:", "sid", request.SID, "label", request.Label)
 
 	fullUrl := fmt.Sprintf("%s/label/%s/values", LokiEndpoint, request.Label)
 

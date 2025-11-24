@@ -53,11 +53,13 @@ class WebhookHandler(http.server.BaseHTTPRequestHandler):
                     try:
                         data = json.loads(post_data.decode('utf-8'))
                         print(f"JSON Data: {json.dumps(data, indent=2, ensure_ascii=False)}")
-                        data_str = json.dumps(data, ensure_ascii=False)
                         for alert in data.get("alerts", []):
                             print(f"status: {alert.get('status')}, labels: {alert.get('labels')}, annotations: {alert.get('annotations')}")
-                            extracted_info = agent.extract_alert_info(alert)
-                            print(f"Extracted Alert Info: {json.dumps(extracted_info, indent=2, ensure_ascii=False)}")
+                            try:
+                                result = agent.extract_alert_info(alert)
+                                print(f"★Alert Analysis Result:\n {json.dumps(result, indent=2, ensure_ascii=False)}")
+                            except Exception as e:
+                                print(f"Alert分析中にエラーが発生しました: {e}")
                     except json.JSONDecodeError:
                         print(f"JSON解析エラー - Raw Data: {post_data.decode('utf-8')}")
 
