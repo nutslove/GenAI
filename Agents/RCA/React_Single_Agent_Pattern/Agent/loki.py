@@ -1,13 +1,10 @@
 import requests
-import os
 from typing import Annotated
 from langchain_core.tools import tool
-from langgraph.prebuilt import InjectedState
-from state import State
 
 LOKI_WRAPPER_ENDPOINT = "http://o11y-tool:8070/o11y/loki/api/v1"
 
-def get_all_loki_labels(state: State) -> dict:
+def get_all_loki_labels() -> str:
   try:
     result = requests.post(f"{LOKI_WRAPPER_ENDPOINT}/labels", timeout=10)
     result_json = result.json()
@@ -17,7 +14,7 @@ def get_all_loki_labels(state: State) -> dict:
     print(f"Failed to get labels from Loki. Error: {repr(e)}")
     all_labels_exist = f"Failed to get labels from Loki. Error: {repr(e)}"
 
-  return {"loki_labels_list": all_labels_exist}
+  return all_labels_exist
 
 @tool
 def run_loki_logql(

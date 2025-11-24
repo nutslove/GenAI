@@ -6,7 +6,7 @@ import time
 from langgraph.graph import StateGraph
 from langchain_google_genai import GoogleGenerativeAIEmbeddings,ChatGoogleGenerativeAI
 from langgraph.prebuilt import ToolNode
-from langfuse.callback import CallbackHandler as langfuse_callback_handler
+from langfuse.langchain import CallbackHandler as langfuse_callback_handler
 from typing import Literal, Annotated, Tuple
 from dataclasses import dataclass
 
@@ -14,15 +14,20 @@ import state
 import loki
 
 load_dotenv('.env')
+os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./service-account-key.json"
+os.environ["LANGFUSE_SECRET_KEY"]
+os.environ["LANGFUSE_PUBLIC_KEY"]
+os.environ["LANGFUSE_BASE_URL"]
 grafana_api_key = os.getenv("GRAFANA_API_KEY")
 
-tool_node = ToolNode([loki.run_loki_logql, loki.get_loki_label_values, loki.get_list_of_streams]) 
+tools = [loki.run_loki_logql, loki.get_loki_label_values, loki.get_list_of_streams]
+tool_node = ToolNode(tools)
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.0-flash-lite",
     temperature=0,
     max_tokens=4096, # default: 8192
 )
-llm_with_tools = llm.bind_tools(tool_node)
+llm_with_tools = llm.bind_tools(tools)
 
 @dataclass
 class AlertData:
@@ -62,6 +67,7 @@ def extract_alert_info(alert_data: dict) -> str:
     labels = alert_data.get("labels", {})
     annotations = alert_data.get("annotations", {})
     generator_url = alert_data.get("generatorURL")
+    log_message = labels.get("message", "N/A")
     query = get_query_in_alert_from_grafana(generator_url)
 
     alert_info = AlertData(
@@ -69,7 +75,7 @@ def extract_alert_info(alert_data: dict) -> str:
         labels=labels,
         annotations=annotations,
         query=query,
-        log_message=labels.get("message", "N/A")
+        log_message=log_message,
     )
     # print(f"Extracted Alert Info: {alert_info}")
     result = start_alert_cause_analysis(alert_info)
@@ -80,22 +86,22 @@ def start_alert_cause_analysis(alert: AlertData):
     workflow.add_node("call_llm", call_llm)
     workflow.add_node("tool_execution", tool_node)
     workflow.add_edge("__start__", "call_llm")
-    workflow.add_conditional_edge("call_llm", should_continue)
+    workflow.add_conditional_edges("call_llm", should_continue)
     graph = workflow.compile()
     final_state = graph.invoke({
         "alert_message": f"AlertName: {alert.labels.get("alertname")}\nLabels: {alert.labels}\nAnnotations: {alert.annotations}\nQuery: {alert.query}\nLog Message: {alert.log_message}",
         "alert_occurred_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
         "metric_list": [],
-        "loki_labels_list": "",
+        "loki_labels_list": loki.get_all_loki_labels(),
     },config={"recursion_limit": 120, "callbacks": [langfuse_callback_handler()]})
     return final_state["messages"][-1]["content"]
 
-def should_continue(state: state.RCAAgentState) -> Literal["run_tools","__end__"]:
+def should_continue(state: state.RCAAgentState) -> Literal["tool_execution","__end__"]:
     messages = state['messages']
     last_message = messages[-1]['content']
     if not last_message.tool_calls:
         return "__end__"
-    return "run_tools"
+    return "tool_execution"
 
 def call_llm(state: state.RCAAgentState):
     system_prompt = """
