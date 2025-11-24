@@ -1,4 +1,3 @@
-
 from dotenv import load_dotenv
 import os
 import requests
@@ -9,6 +8,7 @@ from langgraph.prebuilt import ToolNode
 from langfuse.langchain import CallbackHandler as langfuse_callback_handler
 from typing import Literal, Annotated, Tuple
 from dataclasses import dataclass
+import json
 
 import state
 import loki
@@ -38,12 +38,17 @@ class AlertData:
     log_message: str = ""
 
 def get_query_in_alert_from_grafana(generator_url: str) -> str:
-    if "?orgId=" in generator_url:
+    # print(f"[DEBUG] Original generatorURL: {generator_url}")
+
+    if "alerting/grafana" not in generator_url:
         print("Test Alert from Contact Point")
         return "Test Alert from Contact Point"
+
     try:
         alert_uid = generator_url.split("/")[-2]
-        SPECIFIC_ALERT_RULE_ENDPOINT = generator_url.split("alerting/grafana")[0] + "api/v1/provisioning/alert-rules/" + alert_uid
+        # print(f"[DEBUG] Extracted alert_uid: {alert_uid}")
+        SPECIFIC_ALERT_RULE_ENDPOINT = "http://grafana:3000/api/v1/provisioning/alert-rules/" + alert_uid
+        # print(f"[DEBUG] Constructed API Endpoint: {SPECIFIC_ALERT_RULE_ENDPOINT}")
     except IndexError as e:
         print("Invalid generatorURL format")
         raise e
@@ -54,12 +59,28 @@ def get_query_in_alert_from_grafana(generator_url: str) -> str:
         }
 
         response = requests.get(SPECIFIC_ALERT_RULE_ENDPOINT, headers=headers, timeout=5)
+        # print(f"[DEBUG] Response Status Code: {response.status_code}")
+        # print(f"[DEBUG] Response Body (first 500 chars): {response.text[:500]}")
+
         response.raise_for_status()
-        response_json = response.json()
+
+        # レスポンスが空でないか確認
+        if not response.text:
+            print("[Warning] Empty response from Grafana API")
+            return ""
+
+        try:
+            response_json = response.json()
+            # print(f"[DEBUG] Parsed JSON Response: {json.dumps(response_json, indent=2)}")
+        except ValueError as e:
+            print(f"[Warning] Failed to parse JSON response: {e}")
+            return ""
+
         queries = ", ".join([d["model"]["expr"] for d in response_json["data"] if "expr" in d["model"]])
+        # print(f"[DEBUG] Extracted Queries: {queries}")
         return queries
     except requests.RequestException as e:
-        print(f"Error fetching alert rule from Grafana API: {e}")
+        print(f"[Error] Error fetching alert rule from Grafana API: {e}")
         raise e
 
 def extract_alert_info(alert_data: dict) -> str:
@@ -81,12 +102,13 @@ def extract_alert_info(alert_data: dict) -> str:
     result = start_alert_cause_analysis(alert_info)
     return result
 
-def start_alert_cause_analysis(alert: AlertData):
+def start_alert_cause_analysis(alert: AlertData) -> str:
     workflow = StateGraph(state.RCAAgentState)
     workflow.add_node("call_llm", call_llm)
     workflow.add_node("tool_execution", tool_node)
     workflow.add_edge("__start__", "call_llm")
     workflow.add_conditional_edges("call_llm", should_continue)
+    workflow.add_edge("tool_execution", "call_llm")
     graph = workflow.compile()
     final_state = graph.invoke({
         "alert_message": f"AlertName: {alert.labels.get("alertname")}\nLabels: {alert.labels}\nAnnotations: {alert.annotations}\nQuery: {alert.query}\nLog Message: {alert.log_message}",
@@ -94,18 +116,51 @@ def start_alert_cause_analysis(alert: AlertData):
         "metric_list": [],
         "loki_labels_list": loki.get_all_loki_labels(),
     },config={"recursion_limit": 120, "callbacks": [langfuse_callback_handler()]})
-    return final_state["messages"][-1]["content"]
+
+    print(f"Final State Messages: {final_state['messages']}")
+    result = final_state['messages'][-1].content
+    return result
 
 def should_continue(state: state.RCAAgentState) -> Literal["tool_execution","__end__"]:
     messages = state['messages']
-    last_message = messages[-1]['content']
+    last_message = messages[-1]
     if not last_message.tool_calls:
         return "__end__"
     return "tool_execution"
 
 def call_llm(state: state.RCAAgentState):
-    system_prompt = """
-You are a Root Cause Analysis (RCA) agent specialized in analyzing alerts from Grafana and investigating their causes using tools.
+    system_prompt = f"""
+## Role
+You are a Root Cause Analysis (RCA) agent specialized in analyzing alerts from Grafana and investigating their causes using tools below.
+You have access to the following tools:
+1. run_loki_logql: Use this to execute LogQL queries to retrieve logs from Grafana Loki.
+    - NG LogQL example:
+        - `{{otelTraceID="c58ff9edaead7b757a3ae3411005945f"}}` # Missing curly braces around the selector
+        - `{{job="varlogs"}} |= "error" | limit 10` # there is no 'limit' clause in LogQL
+        - `{{namespace="monitoring", service_name="clickhouse"}} | tail` # there is no 'tail' clause in LogQL
+        - `{{app="nginx"}} | sort` # there is no 'sort' clause in LogQL
+        - `{{pod="langfuse-clickhouse-shard0-0"}} | sort @timestamp desc | limit 10` # there is no 'limit' or 'sort' clause in LogQL
+        - `{{}} |~ "be8af83da40279d7f9cfb2bb256009fb"` # labels(selector) are required in LogQL queries
+        - `{{pod="langfuse-clickhouse-shard0-0"}} | count_over_time([5m])` # wrong `count_over_time` usage
+        - `count_over_time({{namespace="monitoring"}}[1h]) by (pod)` # by clause is not supported in `count_over_time`
+        - `{{service_name=~".*"}} |~ "d49cfc23a353cd76f4c8244c373b2b01"` # When using the =~ operator, you cannot specify only ".*" without any other characters. If you want to specify everything without characters, please specify ".+" instead.
+        - `{{pod="langfuse-clickhouse-shard0-0"}} |~ "error|warn|fail" [1h]` # Wrong usage of range selector (e.g., [1h]); requires `count_over_time` or other functions
+        - `{{pod="langfuse-clickhouse-shard0-0"}} [30m]` # Wrong usage of range selector (e.g., [30m]); requires `count_over_time` or other functions
+    - OK LogQL example:
+        - `{{service_name=~".+"}} |= "c58ff9edaead7b757a3ae3411005945f"`
+        - `{{job=~".*varlogs.*"}} |= "error"`
+        - `count_over_time({{namespace="monitoring", service_name=~"clickhouse.*"}}[5m])`
+2. get_loki_label_values: Use this to get the values that a specific label has from Grafana Loki.
+3. get_list_of_streams: Use this to get the list of log streams in Grafana Loki.
+
+## Available Information
+#### Alert Message
+{state["alert_message"]}
+#### Alert Occurred Time
+{state["alert_occurred_time"]}
+#### Loki Labels List
+{state["loki_labels_list"]}
 """
     res = llm_with_tools.invoke([system_prompt] + state["messages"])
+
     return {"messages": res}

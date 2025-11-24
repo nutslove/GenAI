@@ -39,7 +39,7 @@ class WebhookHandler(http.server.BaseHTTPRequestHandler):
             content_length = int(self.headers.get('Content-Length', 0))
 
             print(f"\n=== Webhook受信 ({datetime.now()}) ===")
-            print(f"Headers: {json.dumps(headers, indent=2, ensure_ascii=False)}")
+            # print(f"[DEBUG] Headers: {json.dumps(headers, indent=2, ensure_ascii=False)}")
 
             # POSTデータを読み取り
             if content_length > 0:
@@ -52,7 +52,7 @@ class WebhookHandler(http.server.BaseHTTPRequestHandler):
                     # JSONデータ
                     try:
                         data = json.loads(post_data.decode('utf-8'))
-                        print(f"JSON Data: {json.dumps(data, indent=2, ensure_ascii=False)}")
+                        # print(f"[DEBUG] JSON Data: {json.dumps(data, indent=2, ensure_ascii=False)}")
                         for alert in data.get("alerts", []):
                             print(f"status: {alert.get('status')}, labels: {alert.get('labels')}, annotations: {alert.get('annotations')}")
                             try:
