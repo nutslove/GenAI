@@ -12,6 +12,8 @@ import json
 
 import state
 import loki
+import tempo
+import prometheus
 
 load_dotenv('.env')
 os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./service-account-key.json"
@@ -20,7 +22,7 @@ os.environ["LANGFUSE_PUBLIC_KEY"]
 os.environ["LANGFUSE_BASE_URL"]
 grafana_api_key = os.getenv("GRAFANA_API_KEY")
 
-tools = [loki.run_loki_logql, loki.get_loki_label_values, loki.get_list_of_streams]
+tools = [loki.run_loki_logql, loki.get_loki_label_values, loki.get_list_of_streams, prometheus.run_prometheus_promql, prometheus.get_prometheus_label_values, prometheus.get_all_prometheus_labels, prometheus.get_labels_and_values_for_metric, tempo.run_tempo_query_trace]
 tool_node = ToolNode(tools)
 llm = ChatGoogleGenerativeAI(
     model="gemini-2.0-flash-lite",
@@ -113,7 +115,7 @@ def start_alert_cause_analysis(alert: AlertData) -> str:
     final_state = graph.invoke({
         "alert_message": f"AlertName: {alert.labels.get("alertname")}\nLabels: {alert.labels}\nAnnotations: {alert.annotations}\nQuery: {alert.query}\nLog Message: {alert.log_message}",
         "alert_occurred_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
-        "metric_list": [],
+        "metric_list": prometheus.get_all_metrics(),
         "loki_labels_list": loki.get_all_loki_labels(),
     },config={"recursion_limit": 120, "callbacks": [langfuse_callback_handler()]})
 
@@ -160,6 +162,8 @@ You have access to the following tools:
 {state["alert_occurred_time"]}
 #### Loki Labels List
 {state["loki_labels_list"]}
+#### Metric List
+{state["metric_list"]}
 """
     res = llm_with_tools.invoke([system_prompt] + state["messages"])
 
