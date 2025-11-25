@@ -154,6 +154,12 @@ You have access to the following tools:
         - `count_over_time({{namespace="monitoring", service_name=~"clickhouse.*"}}[5m])`
 2. get_loki_label_values: Use this to get the values that a specific label has from Grafana Loki.
 3. get_list_of_streams: Use this to get the list of log streams in Grafana Loki.
+4. run_prometheus_promql: Use this to execute PromQL queries to retrieve metrics from Prometheus.
+5. get_prometheus_label_values: Use this to get the values that a specific label has from Prometheus.
+6. get_all_prometheus_labels: Use this to get all labels that exist in Prometheus.
+7. get_labels_and_values_for_metric: Use this to get the labels and their values for a specific metric from Prometheus.
+8. run_tempo_query_trace: Use this to execute a trace query against Grafana Tempo.
+    -  The format of the trace ID is a 32-character hexadecimal string (e.g., "4bf92f3577b34da6a3ce929d0e0e4736", "98100898d812021273ec14bd273e4dda"). If you find a trace ID in the logs, get detailed trace information using this tool with the trace ID.
 
 ## Available Information
 #### Alert Message
