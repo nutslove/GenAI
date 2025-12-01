@@ -2,7 +2,6 @@ from dotenv import load_dotenv
 import os
 import requests
 import time
-from langchain.agents import create_agent
 from langgraph.graph import StateGraph
 from langchain_google_genai import GoogleGenerativeAIEmbeddings,ChatGoogleGenerativeAI
 from langgraph.prebuilt import ToolNode
@@ -87,6 +86,15 @@ Avoid:
 Write the summary in clear, concise prose or structured bullet points. Prioritize information density while maintaining readability. The summary should allow the investigation to continue seamlessly without re-checking already verified items.
 """
 
+summarize_mw = SummarizationMiddleware(
+    model=llm,
+    trigger=("tokens", 4000),
+    summary_prompt=summarize_prompt,
+    trim_tokens_to_summarize=2000,
+)
+
+# summarize_mw_before_call_llm_node = RunnableCallable(summarize_mw)
+
 @dataclass
 class AlertData:
     status: str
@@ -161,33 +169,57 @@ def extract_alert_info(alert_data: dict) -> str:
     return result
 
 def start_alert_cause_analysis(alert: AlertData) -> str:
-    # 動的にシステムプロンプトを生成
-    alert_message = f"AlertName: {alert.labels.get('alertname')}\nLabels: {alert.labels}\nAnnotations: {alert.annotations}\nQuery: {alert.query}\nLog Message: {alert.log_message}"
-    alert_occurred_time = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-    loki_labels = loki.get_all_loki_labels()
-    metrics = prometheus.get_all_metrics()
+    workflow = StateGraph(state.RCAAgentState)
+    workflow.add_node("call_llm", call_llm)
+    workflow.add_node("tool_execution", tool_node)
+    # workflow.add_node("summarize_mw_before_call_llm", summarize_mw_before_call_llm_node, input_schema=state.RCAAgentState)
+    workflow.add_node("summarize_mw_before_call_llm", summarize_mw.before_model)
 
+    workflow.add_edge("__start__", "call_llm")
+    workflow.add_conditional_edges("call_llm", should_continue)
+    workflow.add_edge("tool_execution", "summarize_mw_before_call_llm")
+    workflow.add_edge("summarize_mw_before_call_llm", "call_llm")
+    graph = workflow.compile()
+    final_state = graph.invoke({
+        "alert_message": f"AlertName: {alert.labels.get("alertname")}\nLabels: {alert.labels}\nAnnotations: {alert.annotations}\nQuery: {alert.query}\nLog Message: {alert.log_message}",
+        "alert_occurred_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+        "metric_list": prometheus.get_all_metrics(),
+        "loki_labels_list": loki.get_all_loki_labels(),
+    },config={"recursion_limit": 120, "callbacks": [langfuse_callback_handler()]})
+
+    print(f"Final State Messages: {final_state['messages']}")
+    result = final_state['messages'][-1].content
+    return result
+
+def should_continue(state: state.RCAAgentState) -> Literal["tool_execution","__end__"]:
+    messages = state['messages']
+    last_message = messages[-1]
+    if not last_message.tool_calls:
+        return "__end__"
+    return "tool_execution"
+
+def call_llm(state: state.RCAAgentState):
     system_prompt = f"""
 ## Role
 You are a Root Cause Analysis (RCA) agent specialized in analyzing alerts from Grafana and investigating their causes using tools below.
 You have access to the following tools:
 1. run_loki_logql: Use this to execute LogQL queries to retrieve logs from Grafana Loki.
     - NG LogQL example:
-        - `{{{{otelTraceID="c58ff9edaead7b757a3ae3411005945f"}}}}` # Missing curly braces around the selector
-        - `{{{{job="varlogs"}}}} |= "error" | limit 10` # there is no 'limit' clause in LogQL
-        - `{{{{namespace="monitoring", service_name="clickhouse"}}}} | tail` # there is no 'tail' clause in LogQL
-        - `{{{{app="nginx"}}}} | sort` # there is no 'sort' clause in LogQL
-        - `{{{{pod="langfuse-clickhouse-shard0-0"}}}} | sort @timestamp desc | limit 10` # there is no 'limit' or 'sort' clause in LogQL
-        - `{{{{}}}} |~ "be8af83da40279d7f9cfb2bb256009fb"` # labels(selector) are required in LogQL queries
-        - `{{{{pod="langfuse-clickhouse-shard0-0"}}}} | count_over_time([5m])` # wrong `count_over_time` usage
-        - `count_over_time({{{{namespace="monitoring"}}}}[1h]) by (pod)` # by clause is not supported in `count_over_time`
-        - `{{{{service_name=~".*"}}}} |~ "d49cfc23a353cd76f4c8244c373b2b01"` # When using the =~ operator, you cannot specify only ".*" without any other characters. If you want to specify everything without characters, please specify ".+" instead.
-        - `{{{{pod="langfuse-clickhouse-shard0-0"}}}} |~ "error|warn|fail" [1h]` # Wrong usage of range selector (e.g., [1h]); requires `count_over_time` or other functions
-        - `{{{{pod="langfuse-clickhouse-shard0-0"}}}} [30m]` # Wrong usage of range selector (e.g., [30m]); requires `count_over_time` or other functions
+        - `{{otelTraceID="c58ff9edaead7b757a3ae3411005945f"}}` # Missing curly braces around the selector
+        - `{{job="varlogs"}} |= "error" | limit 10` # there is no 'limit' clause in LogQL
+        - `{{namespace="monitoring", service_name="clickhouse"}} | tail` # there is no 'tail' clause in LogQL
+        - `{{app="nginx"}} | sort` # there is no 'sort' clause in LogQL
+        - `{{pod="langfuse-clickhouse-shard0-0"}} | sort @timestamp desc | limit 10` # there is no 'limit' or 'sort' clause in LogQL
+        - `{{}} |~ "be8af83da40279d7f9cfb2bb256009fb"` # labels(selector) are required in LogQL queries
+        - `{{pod="langfuse-clickhouse-shard0-0"}} | count_over_time([5m])` # wrong `count_over_time` usage
+        - `count_over_time({{namespace="monitoring"}}[1h]) by (pod)` # by clause is not supported in `count_over_time`
+        - `{{service_name=~".*"}} |~ "d49cfc23a353cd76f4c8244c373b2b01"` # When using the =~ operator, you cannot specify only ".*" without any other characters. If you want to specify everything without characters, please specify ".+" instead.
+        - `{{pod="langfuse-clickhouse-shard0-0"}} |~ "error|warn|fail" [1h]` # Wrong usage of range selector (e.g., [1h]); requires `count_over_time` or other functions
+        - `{{pod="langfuse-clickhouse-shard0-0"}} [30m]` # Wrong usage of range selector (e.g., [30m]); requires `count_over_time` or other functions
     - OK LogQL example:
-        - `{{{{service_name=~".+"}}}} |= "c58ff9edaead7b757a3ae3411005945f"`
-        - `{{{{job=~".*varlogs.*"}}}} |= "error"`
-        - `count_over_time({{{{namespace="monitoring", service_name=~"clickhouse.*"}}}}[5m])`
+        - `{{service_name=~".+"}} |= "c58ff9edaead7b757a3ae3411005945f"`
+        - `{{job=~".*varlogs.*"}} |= "error"`
+        - `count_over_time({{namespace="monitoring", service_name=~"clickhouse.*"}}[5m])`
 2. get_loki_label_values: Use this to get the values that a specific label has from Grafana Loki.
 3. get_list_of_streams: Use this to get the list of log streams in Grafana Loki.
 4. run_prometheus_promql: Use this to execute PromQL queries to retrieve metrics from Prometheus.
@@ -199,37 +231,14 @@ You have access to the following tools:
 
 ## Available Information
 #### Alert Message
-{alert_message}
+{state["alert_message"]}
 #### Alert Occurred Time
-{alert_occurred_time}
+{state["alert_occurred_time"]}
 #### Loki Labels List
-{loki_labels}
+{state["loki_labels_list"]}
 #### Metric List
-{metrics}
+{state["metric_list"]}
 """
+    res = llm_with_tools.invoke([system_prompt] + state["messages"])
 
-    agent = create_agent(
-        model=llm,
-        tools=tools,
-        system_prompt=system_prompt,
-        state_schema=state.RCAAgentState,
-        middleware=[
-            SummarizationMiddleware(
-                # model=llm,
-                model="gemini-2.0-flash-lite",
-                trigger=("tokens", 4000),
-                keep=("messages", 5),
-                summary_prompt=summarize_prompt,
-                trim_tokens_to_summarize=2000,
-            ),
-        ],
-    )
-    result = agent.invoke({
-        "messages": [{"role": "user", "content": "analyze what is alert cause."}],
-        "alert_message": alert_message,
-        "alert_occurred_time": alert_occurred_time,
-        "metric_list": metrics,
-        "loki_labels_list": loki_labels,
-    }, config={"recursion_limit": 120, "callbacks": [langfuse_callback_handler()]})
-
-    return result["messages"][-1].content
+    return {"messages": res}
