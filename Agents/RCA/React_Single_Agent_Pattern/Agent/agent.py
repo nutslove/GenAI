@@ -25,10 +25,13 @@ os.environ["LANGFUSE_PUBLIC_KEY"]
 os.environ["LANGFUSE_BASE_URL"]
 grafana_api_key = os.getenv("GRAFANA_API_KEY")
 
+# model = "gemini-2.0-flash-lite"
+model = "gemini-2.5-flash"
+
 tools = [loki.run_loki_logql, loki.get_loki_label_values, loki.get_list_of_streams, prometheus.run_prometheus_promql, prometheus.get_prometheus_label_values, prometheus.get_all_prometheus_labels, prometheus.get_labels_and_values_for_metric, tempo.run_tempo_query_trace]
 tool_node = ToolNode(tools)
 llm = ChatGoogleGenerativeAI(
-    model="gemini-2.0-flash-lite",
+    model=model,
     temperature=0,
     max_tokens=4096, # default: 8192
 )
@@ -215,8 +218,7 @@ You have access to the following tools:
         state_schema=state.RCAAgentState,
         middleware=[
             SummarizationMiddleware(
-                # model=llm,
-                model="gemini-2.0-flash-lite",
+                model=model,
                 trigger=("tokens", 4000),
                 keep=("messages", 5),
                 summary_prompt=summarize_prompt,
