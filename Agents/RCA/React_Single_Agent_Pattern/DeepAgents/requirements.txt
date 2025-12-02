@@ -1,0 +1,13 @@
+langchain==1.1.0
+langchain-postgres==0.0.16
+langchain-community==0.4.1
+langgraph==1.0.4
+langgraph-prebuilt==1.0.5
+langchain-google-genai==3.1.0
+langchain-google-vertexai==3.1.0
+google-genai==1.52.0
+sqlalchemy==2.0.44
+langchain-mcp-adapters==0.1.13
+langfuse==3.10.1
+python-dotenv==1.2.1
+deepagents==0.2.8

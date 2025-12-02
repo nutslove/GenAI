@@ -178,10 +178,14 @@ services:
 
   alert-receiver:
     build:
-      context: ./Agent
+      # context: ./Agent
+      context: ./DeepAgents
       dockerfile: Dockerfile
       no_cache: true
-    container_name: alert_receiver
+    # container_name: alert_receiver
+    container_name: deep_agent_alert_receiver
+    ports:
+      - 8089:8089
     restart: always
     networks:
       shared-network:
